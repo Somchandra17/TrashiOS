@@ -1,0 +1,5 @@
+# GLiNER NER backend — ML-based PII entity detection (50+ PII types)
+# Enable with: python main.py --ner
+# Model: urchade/gliner_multi_pii-v1 (~560 MB, downloaded on first run)
+rich>=13.0
+presidio-analyzer[gliner]>=2.2.35

@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env/
+
+# Runtime output (may contain sensitive app data)
+output/
+*-dump.json
+
+# Personal notes / AI drafts
+kimi_response.txt
+todo.txt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+plans/
+
+# GLiNER / Hugging Face model cache
+.cache/
+model_cache/
+*.bin
+*.safetensors

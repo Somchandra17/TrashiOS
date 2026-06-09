@@ -1,0 +1,4 @@
+# Presidio PII detection — regex + checksum validators (credit card Luhn, SSN format, etc.)
+# Enable with: python main.py --presidio
+rich>=13.0
+presidio-analyzer>=2.2.35

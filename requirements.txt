@@ -1,0 +1,21 @@
+rich>=13.0
+
+# Runtime instrumentation (the Drozer-equivalent layer).
+# frida-tools provides frida / frida-ps; objection drives high-level iOS introspection.
+frida-tools>=12.0
+objection>=1.11.0
+
+# ── Host CLI tools (NOT pip — install via Homebrew) ──
+#   brew install libimobiledevice libusbmuxd ideviceinstaller
+#   (idevice_id, ideviceinfo, idevicesyslog, idevicebackup2, idevicescreenshot, iproxy)
+#   brew install sshpass            # non-interactive SSH password auth (or use SSH keys)
+#   xcode-select --install          # otool, codesign (Mach-O / entitlements)
+#   brew install class-dump          # optional: ObjC header dump
+
+# Optional: Presidio PII detection (regex + checksum validators)
+# Install with: pip install -r requirements-presidio.txt
+# Or: pip install presidio-analyzer>=2.2.35
+
+# Optional: GLiNER NER backend (ML-based PII detection, ~560 MB model)
+# Install with: pip install -r requirements-ner.txt
+# Or: pip install "presidio-analyzer[gliner]>=2.2.35"
