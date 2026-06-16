@@ -90,6 +90,10 @@ def parse_args() -> argparse.Namespace:
                         help="Device SSH port (palera1n=44, classic checkra1n=22). Default: 44")
     parser.add_argument("--ssh-pass", type=str, default="alpine", help="Device root SSH password (default: alpine)")
     parser.add_argument("--local-port", type=int, default=2222, help="Local iproxy port for SSH (default: 2222)")
+    parser.add_argument("--mirror", action="store_true",
+                        help="Open a QuickTime live-view without asking (interactive mode otherwise prompts y/n; "
+                             "default no). WARNING: mirroring sets UIScreen.isCaptured, so anti-screen-capture apps "
+                             "(e.g. Intune-MAM) blur their UI — the screenshots captured during the run will be blurred too.")
     parser.add_argument("--track", choices=["all", "static", "dynamic"], default="all",
                         help="Run only static (SAST) or dynamic (DAST) phases. Default: all")
     parser.add_argument("--decrypt", action="store_true",
@@ -223,9 +227,17 @@ def main() -> int:
 
     console.print(f"\n[bold]Phases to run:[/bold] {sorted(selected)}\n")
 
-    # Phases that capture screenshots benefit from a live view (snapshot, URL schemes, post-logout).
-    if any(p in selected for p in (6, 10, 11)) and not args.auto:
-        screenshotter.start_mirror()
+    # Optional QuickTime live device view (interactive only). Mirroring triggers anti-screen-capture
+    # blur in some apps and isn't needed for evidence (screenshots come from Frida), so we ASK.
+    if not args.auto:
+        from rich.prompt import Confirm
+        want_mirror = args.mirror or Confirm.ask(
+            "[yellow]⚠ Open a QuickTime live device view?[/yellow] [bold]Warning:[/bold] for anti-screen-capture "
+            "apps (e.g. Intune-MAM) mirroring sets UIScreen.isCaptured and the app blurs its UI — so the "
+            "[bold]screenshots captured this run will ALSO be blurred[/bold]. Leave OFF for crisp report screenshots",
+            default=False)
+        if want_mirror:
+            screenshotter.start_mirror()
 
     # ── Execute phases ──
     phase_runners = {
