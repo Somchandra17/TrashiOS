@@ -120,31 +120,99 @@ class FridaBridge:
         if not self._objection:
             return RuntimeResult("objection", command, "", "objection not found in PATH", False)
 
-        script = None
+        # objection REPL commands go via -s/--startup-command (repeatable, ends with 'exit' to quit).
+        # NB: -S/--startup-script is a Frida *JavaScript* file, not REPL commands.
+        argv = ["objection", "-g", self.bundle_id, "explore", "-q", "-s", command, "-s", "exit"]
         try:
-            with tempfile.NamedTemporaryFile("w", suffix=".objection", delete=False) as fh:
-                fh.write(command + "\nexit\n")
-                script = fh.name
-            argv = ["objection", "-g", self.bundle_id, "explore", "-q", "-S", script]
             r = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
-            raw = r.stdout or ""
-            clean = _strip_objection_noise(raw)
-            had_error = bool(_ERROR_RE.search(raw + " " + (r.stderr or "")))
-            success = (r.returncode == 0) and not had_error and bool(clean)
-            return RuntimeResult("objection", command, clean, (r.stderr or "").strip(), success, raw)
         except subprocess.TimeoutExpired:
             return RuntimeResult("objection", command, "", f"timed out after {timeout}s", False)
-        finally:
-            if script:
-                try:
-                    Path(script).unlink()
-                except OSError:
-                    pass
+        raw = r.stdout or ""
+        clean = _strip_objection_noise(raw)
+        had_error = bool(_ERROR_RE.search(raw + " " + (r.stderr or "")))
+        success = (r.returncode == 0) and not had_error and bool(clean)
+        return RuntimeResult("objection", command, clean, (r.stderr or "").strip(), success, raw)
 
     # ── objection-backed introspection (the Drozer-module analogues) ──
 
-    def keychain_dump(self) -> RuntimeResult:
-        return self._objection_run("ios keychain dump")
+    _KEYCHAIN_JS = """
+rpc.exports = {
+  keychain: function () {
+    if (!ObjC.available) return { error: 'ObjC unavailable' };
+    function cptr(n) { var p = Module.findGlobalExportByName(n); return p ? p.readPointer() : null; }
+    function cobj(n) { var p = cptr(n); return p ? new ObjC.Object(p) : null; }
+    var addr = Module.findGlobalExportByName('SecItemCopyMatching');
+    if (!addr) return { error: 'SecItemCopyMatching not found' };
+    var Sec = new NativeFunction(addr, 'int', ['pointer', 'pointer']);
+    var kCls = cobj('kSecClass'), kRA = cobj('kSecReturnAttributes'), kRD = cobj('kSecReturnData'),
+        kML = cobj('kSecMatchLimit'), kAll = cobj('kSecMatchLimitAll');
+    if (!kCls || !kRA || !kML || !kAll) return { error: 'kSec constants unavailable' };
+    var T = ObjC.classes.NSNumber.numberWithBool_(1);
+    var classes = ['kSecClassGenericPassword', 'kSecClassInternetPassword', 'kSecClassKey',
+                   'kSecClassCertificate', 'kSecClassIdentity'];
+    var out = [];
+    classes.forEach(function (cn) {
+      var c = cobj(cn); if (!c) return;
+      var q = ObjC.classes.NSMutableDictionary.dictionary();
+      q.setObject_forKey_(c, kCls);
+      q.setObject_forKey_(T, kRA);
+      if (kRD) q.setObject_forKey_(T, kRD);
+      q.setObject_forKey_(kAll, kML);
+      var rp = Memory.alloc(Process.pointerSize);
+      if (Sec(q, rp) !== 0) return;  // errSecItemNotFound etc.
+      var res = new ObjC.Object(rp.readPointer());
+      var items = [];
+      if (res.isKindOfClass_(ObjC.classes.NSArray)) {
+        for (var i = 0; i < res.count(); i++) items.push(res.objectAtIndex_(i));
+      } else { items.push(res); }
+      items.forEach(function (it) {
+        function g(k) { try { var v = it.objectForKey_(k); return v ? v.toString() : null; } catch (e) { return null; } }
+        var data = null;
+        try {
+          var d = it.objectForKey_('v_Data');
+          if (d) { var s = ObjC.classes.NSString.alloc().initWithData_encoding_(d, 4); data = s ? s.toString() : ('<binary ' + d.length() + ' bytes>'); }
+        } catch (e) {}
+        out.push({ cls: cn.replace('kSecClass', ''), account: g('acct'), service: g('svce'),
+                   agrp: g('agrp'), accessible: g('pdmn'), data: data });
+      });
+    });
+    return { items: out };
+  }
+};
+"""
+
+    def keychain_dump(self):
+        """Dump keychain items via a raw Frida agent (objection-free; works on Frida 17).
+        Returns (items, error_message). Each item: {cls, account, service, agrp, accessible, data}."""
+        try:
+            import frida, time
+        except Exception as e:
+            return [], f"frida python binding unavailable: {e}"
+        try:
+            dev = frida.get_usb_device(timeout=5)
+        except Exception as e:
+            return [], f"no USB device: {e}"
+        pid = self.device.get_pid(self.bundle_id)
+        try:
+            if not pid:
+                pid = dev.spawn([self.bundle_id]); dev.resume(pid); time.sleep(4)
+            session = dev.attach(int(pid))
+        except Exception as e:
+            return [], f"attach to {self.bundle_id} refused ({e}) — likely anti-debug / managed-app (MAM) protection"
+        try:
+            script = session.create_script(_with_objc(self._KEYCHAIN_JS))
+            script.load()
+            exports = getattr(script, "exports_sync", None) or script.exports
+            res = exports.keychain()
+            try:
+                session.detach()
+            except Exception:
+                pass
+            if isinstance(res, dict) and res.get("error"):
+                return [], res["error"]
+            return (res.get("items", []) if isinstance(res, dict) else []), ""
+        except Exception as e:
+            return [], f"keychain agent error: {e}"
 
     def nsuserdefaults(self) -> RuntimeResult:
         return self._objection_run("ios nsuserdefaults get")

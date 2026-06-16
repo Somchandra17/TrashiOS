@@ -1,10 +1,11 @@
 """
-Phase III — Keychain Dump & Data-Protection-Class Assessment.
+Phase V — Keychain Dump & Data-Protection-Class Assessment.
 
-Dumps the keychain items the app stored (via objection) and assesses the
-kSecAttrAccessible* protection class of each: items accessible regardless of
-lock state, or that are not ThisDeviceOnly (so they migrate via backup/iCloud),
-are weaker than they should be.
+Dumps keychain items via a raw Frida agent (SecItemCopyMatching — objection-free
+and Frida-17 compatible), then assesses each item's kSecAttrAccessible protection
+class: items accessible while the device is locked (kSecAttrAccessibleAlways) or
+that are not ThisDeviceOnly (so they migrate via encrypted backup / iCloud
+Keychain) are weaker than they should be. Item data is scanned for secrets.
 
 Grounded in OWASP MASTG-TECH-0061 / MASTG-TEST-0055, MASVS-STORAGE-1/-2.
 """
@@ -12,8 +13,6 @@ Grounded in OWASP MASTG-TECH-0061 / MASTG-TEST-0055, MASVS-STORAGE-1/-2.
 from __future__ import annotations
 
 import json
-import time
-from pathlib import Path
 
 from rich.console import Console
 from rich.panel import Panel
@@ -25,6 +24,23 @@ from utils.helpers import presidio_scan_text, presidio_findings_to_report
 
 console = Console()
 PHASE = "Phase V — Keychain Dump & Data Protection"
+
+# kSecAttrAccessible protection classes, keyed by the on-disk "pdmn" code.
+# value = (readable name, this_device_only, accessible_while_locked)
+_PDMN = {
+    "ak":   ("WhenUnlocked", False, False),
+    "ck":   ("AfterFirstUnlock", False, False),
+    "dk":   ("Always", False, True),
+    "aku":  ("WhenUnlockedThisDeviceOnly", True, False),
+    "cku":  ("AfterFirstUnlockThisDeviceOnly", True, False),
+    "dku":  ("AlwaysThisDeviceOnly", True, True),
+    "akpu": ("WhenPasscodeSetThisDeviceOnly", True, False),
+}
+
+
+def _label(code) -> str:
+    info = _PDMN.get(code)
+    return info[0] if info else (code or "unknown")
 
 
 def run_keychain_analysis(config: Config, device: IOSDevice, frida: FridaBridge) -> None:
@@ -41,152 +57,105 @@ def run_keychain_analysis(config: Config, device: IOSDevice, frida: FridaBridge)
                             style="bold yellow"))
         input()
 
-    # objection attaches to the running app — make sure it's running.
-    _ensure_running(config, device)
+    console.print("[cyan]Dumping keychain via Frida (SecItemCopyMatching)...[/cyan]")
+    items, err = frida.keychain_dump()
+    config.log_command(PHASE, "frida: SecItemCopyMatching (all security classes)",
+                       f"{len(items)} item(s)" if items else (err or "no items"))
 
-    console.print("[cyan]Dumping keychain via objection...[/cyan]")
-    json_path = (config.output_dir / "keychain" / "keychain.json").resolve()
-    res = frida._objection_run(f"ios keychain dump --json {json_path}")
-    config.log_command(PHASE, "objection: ios keychain dump --json", res.stdout or res.stderr)
-
-    items = _load_items(json_path, res.stdout)
+    if not items and err:
+        console.print(f"[yellow]Keychain dump failed: {err}[/yellow]")
+        config.add_finding(PHASE, "Keychain dump failed (instrumentation error)", "Info",
+                           f"Could not dump the keychain via Frida. Reason: {err}\n"
+                           "Common cause: anti-debug / managed-app (Intune MAM) protection, or the app not running.")
+        return
     if not items:
-        # Last resort: a plain dump for evidence
-        plain = frida.keychain_dump()
-        (config.output_dir / "keychain" / "keychain_dump.txt").write_text(
-            plain.raw_stdout or plain.stdout, encoding="utf-8")
-        if not plain.success or not plain.stdout.strip():
-            # Distinguish a real attach/dump failure from a genuinely empty keychain.
-            diag = (res.stderr or plain.stderr or res.raw_stdout or "").strip()
-            attach_failed = any(s in diag.lower() for s in
-                                ("failed to", "unable to", "not found", "needsbridge", "frida"))
-            if attach_failed:
-                console.print(f"[yellow]Keychain dump failed (objection could not attach / run).[/yellow]")
-                console.print(f"[dim]  {diag[:300]}[/dim]")
-                config.add_finding(PHASE, "Keychain dump failed (instrumentation error)", "Info",
-                                   "objection could not attach to the app or run the keychain module — possibly "
-                                   "anti-debug / managed-app (Intune MAM) protection, or the app was not running. "
-                                   f"Diagnostic:\n{diag[:800]}\nRaw output saved to keychain/keychain_dump.txt.")
-            else:
-                console.print("[yellow]No keychain items returned (keychain appears empty for this app).[/yellow]")
-                config.add_finding(PHASE, "Keychain empty for this app", "Info",
-                                   "objection attached but returned no keychain items. The app may store secrets "
-                                   "in files/NSUserDefaults instead (see the Local Data Storage phase) rather than "
-                                   "the keychain. Confirm the app was logged in.")
-            return
-        items = _parse_text_dump(plain.stdout)
+        console.print("[yellow]No keychain items (empty for this app's access groups).[/yellow]")
+        config.add_finding(PHASE, "Keychain empty for this app", "Info",
+                           "Frida attached but SecItemCopyMatching returned no items for the app's keychain access "
+                           "groups. The app may store secrets in files / NSUserDefaults instead — see Local Storage.")
+        return
 
-    console.print(f"  [green]{len(items)} keychain item(s) retrieved.[/green]")
-    _assess_items(config, items)
-
+    console.print(f"  [green]{len(items)} keychain item(s) dumped.[/green]")
+    _write_evidence(config, items)
+    _assess_protection_classes(config, items)
+    _scan_secrets(config, items)
     console.print(f"\n[green]✓ {PHASE} complete.[/green]")
 
 
-def _ensure_running(config: Config, device: IOSDevice) -> None:
-    pid = device.get_pid(config.bundle_id)
-    if not pid:
-        console.print("  [cyan]Launching app for keychain context...[/cyan]")
-        device.launch_app(config.bundle_id)
-        time.sleep(4)
+def _write_evidence(config: Config, items: list[dict]) -> None:
+    kdir = config.output_dir / "keychain"
+    kdir.mkdir(parents=True, exist_ok=True)
+    (kdir / "keychain_items.json").write_text(json.dumps(items, indent=2, default=str), encoding="utf-8")
+    values = "\n".join(
+        f"[{it.get('cls')}] {it.get('service') or '?'} / {it.get('account') or '?'} "
+        f"(accessible={it.get('accessible')}={_label(it.get('accessible'))}, group={it.get('agrp')}):\n  {it.get('data')}"
+        for it in items if it.get("data")
+    )
+    if values:
+        (kdir / "keychain_values.txt").write_text(values, encoding="utf-8")
 
 
-def _load_items(json_path: Path, stdout: str) -> list[dict]:
-    if json_path.exists():
-        try:
-            data = json.loads(json_path.read_text(encoding="utf-8"))
-            if isinstance(data, list):
-                return data
-            if isinstance(data, dict):
-                # some objection versions wrap under a key
-                for v in data.values():
-                    if isinstance(v, list):
-                        return v
-        except Exception:
-            pass
-    return []
-
-
-def _accessible_of(item: dict) -> str:
-    for k, v in item.items():
-        if "access" in k.lower() and isinstance(v, str) and "kSecAttrAccessible" in v:
-            return v
-        if k.lower() in ("accessible", "accessible_attribute", "protection") and isinstance(v, str):
-            return v
-    return item.get("accessible", "") or ""
-
-
-def _field(item: dict, *names: str) -> str:
-    for n in names:
-        for k, v in item.items():
-            if k.lower() == n and v:
-                return str(v)
-    return ""
-
-
-def _assess_items(config: Config, items: list[dict]) -> None:
-    secret_blob_parts: list[str] = []
-    weak_always = 0
-    not_device_only = 0
-
+def _assess_protection_classes(config: Config, items: list[dict]) -> None:
+    always_not_device, always_device, not_device_only, unknown = [], [], [], []
     for it in items:
-        accessible = _accessible_of(it)
-        acc_l = accessible.lower()
-        account = _field(it, "account", "acct")
-        service = _field(it, "service", "svce")
-        data_val = _field(it, "data", "v_data", "value")
-        label = f"{service or '?'} / {account or '?'}"
-        if data_val:
-            secret_blob_parts.append(f"{label}: {data_val}")
+        code = (it.get("accessible") or "").strip()
+        info = _PDMN.get(code)
+        tag = (f"{it.get('service') or it.get('account') or '?'} "
+               f"(class={code or '?'}={_label(code)}, group={it.get('agrp')})")
+        if not info:
+            unknown.append(tag)
+            continue
+        _, device_only, _ = info
+        if code == "dk":
+            always_not_device.append(tag)
+        elif code == "dku":
+            always_device.append(tag)
+        elif not device_only:
+            not_device_only.append(tag)
 
-        if "always" in acc_l:
-            weak_always += 1
-            config.add_finding(
-                PHASE, f"Keychain item accessible regardless of lock state: {label}", "High",
-                f"Item uses {accessible or 'kSecAttrAccessibleAlways'} — readable even when the device is locked, "
-                f"and recoverable from a lost/stolen device. Account='{account}', Service='{service}'. "
-                "Verified via keychain dump.",
-            )
-        elif accessible and "thisdeviceonly" not in acc_l:
-            not_device_only += 1
-            sev = "Medium" if "afterfirstunlock" in acc_l else "Low"
-            config.add_finding(
-                PHASE, f"Keychain item not ThisDeviceOnly: {label}", sev,
-                f"Item uses {accessible} (not *ThisDeviceOnly) — it migrates to a new device via encrypted "
-                f"backup/iCloud Keychain. Prefer a ...ThisDeviceOnly class for app secrets. "
-                f"Account='{account}', Service='{service}'. Verified via keychain dump.",
-            )
-
-    # Treat recovered secret material as a finding (PII/credentials in keychain values).
-    if secret_blob_parts:
-        blob = "\n".join(secret_blob_parts)
-        (config.output_dir / "keychain" / "keychain_values.txt").write_text(blob, encoding="utf-8")
-        findings = presidio_scan_text(blob, config, source_label="keychain")
-        if findings:
-            presidio_findings_to_report(
-                findings, PHASE, config,
-                fallback_title="Credentials recoverable from keychain",
-                fallback_detail="Keychain item values contain sensitive material recoverable from the device. "
-                                "Verified via keychain dump.",
-            )
-
-    if weak_always == 0 and not_device_only == 0:
+    if always_not_device:
+        config.add_finding(PHASE,
+                           f"Keychain items accessible while locked & not device-bound ({len(always_not_device)})",
+                           "High",
+                           "kSecAttrAccessibleAlways: readable even when the device is locked AND migrates via "
+                           "encrypted backup / iCloud Keychain. Use the strictest class that fits "
+                           "(prefer ...WhenPasscodeSetThisDeviceOnly).\n  - " + "\n  - ".join(always_not_device[:40]))
+    if always_device:
+        config.add_finding(PHASE, f"Keychain items accessible while device is locked ({len(always_device)})",
+                           "Medium",
+                           "kSecAttrAccessibleAlwaysThisDeviceOnly: readable even when the device is locked "
+                           "(device-bound, so no migration). Prefer a When-Unlocked / passcode-set class.\n  - "
+                           + "\n  - ".join(always_device[:40]))
+    if not_device_only:
+        config.add_finding(PHASE, f"Keychain items not ThisDeviceOnly ({len(not_device_only)})", "Medium",
+                           "These items are NOT ...ThisDeviceOnly, so they migrate to a new device via encrypted "
+                           "backup / iCloud Keychain. Scope app secrets to a *ThisDeviceOnly class.\n  - "
+                           + "\n  - ".join(not_device_only[:40]))
+    if not (always_not_device or always_device or not_device_only):
         config.add_finding(PHASE, f"Keychain protection classes acceptable ({len(items)} items)", "Info",
-                           "No items used kSecAttrAccessibleAlways and none lacked ThisDeviceOnly scoping. "
-                           "Confirm long-lived tokens still warrant WhenPasscodeSetThisDeviceOnly.")
+                           "All items use ThisDeviceOnly classes and none use kSecAttrAccessibleAlways. "
+                           "Confirm long-lived tokens warrant WhenPasscodeSetThisDeviceOnly.")
 
 
-def _parse_text_dump(stdout: str) -> list[dict]:
-    """Fallback: parse objection's text table into dicts (best-effort)."""
-    items: list[dict] = []
-    header: list[str] = []
-    for line in stdout.splitlines():
-        cells = [c.strip() for c in line.split("  ") if c.strip()]
-        if not cells:
-            continue
-        low = line.lower()
-        if not header and ("account" in low or "service" in low) and "data" in low:
-            header = [c.lower() for c in cells]
-            continue
-        if header and len(cells) >= 2:
-            items.append({header[i]: cells[i] for i in range(min(len(header), len(cells)))})
-    return items
+def _scan_secrets(config: Config, items: list[dict]) -> None:
+    blob = "\n".join(
+        f"{it.get('service') or ''} {it.get('account') or ''}: {it.get('data')}"
+        for it in items
+        if it.get("data") and not str(it.get("data")).startswith("<binary")
+    )
+    if not blob.strip():
+        return
+    findings = presidio_scan_text(blob, config, source_label="keychain")
+    if findings:
+        presidio_findings_to_report(
+            findings, PHASE, config,
+            fallback_title="Credentials recoverable from keychain",
+            fallback_detail="Keychain item values (recovered from this device via Frida) contain sensitive material. "
+                            "Verified via SecItemCopyMatching dump.",
+        )
+    else:
+        config.add_finding(PHASE, f"Keychain contents recoverable on jailbroken device ({len(items)} items)", "Medium",
+                           "All keychain items for the app's access groups were dumped via Frida on this jailbroken "
+                           "device (accounts, services, data). Protection classes apply on a non-jailbroken device, "
+                           "but on a compromised/jailbroken device the contents are recoverable. "
+                           "Evidence: keychain/keychain_items.json.")
