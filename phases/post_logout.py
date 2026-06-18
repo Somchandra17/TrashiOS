@@ -67,10 +67,14 @@ def _check_token_persistence(config: Config, device: IOSDevice, frida: FridaBrid
     # 1) Keychain re-dump
     if frida.verify_connection():
         _ensure_running(config, device)
-        kc = frida.keychain_dump()
-        (config.output_dir / "keychain" / "keychain_post_logout.txt").write_text(
-            kc.raw_stdout or kc.stdout, encoding="utf-8")
-        residual = [ln for ln in (kc.stdout or "").splitlines() if _TOKEN_RE.search(ln)]
+        items, _err = frida.keychain_dump()
+        kc_text = "\n".join(
+            f"[{it.get('cls')}] {it.get('service') or '?'}/{it.get('account') or '?'} "
+            f"accessible={it.get('accessible')}: {it.get('data')}"
+            for it in items
+        )
+        (config.output_dir / "keychain" / "keychain_post_logout.txt").write_text(kc_text, encoding="utf-8")
+        residual = [ln for ln in kc_text.splitlines() if _TOKEN_RE.search(ln)]
         if residual:
             config.add_finding(
                 PHASE, "Session token persists in keychain after logout", "High",

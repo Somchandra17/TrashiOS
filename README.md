@@ -112,6 +112,8 @@ The framework starts the SSH-over-USB tunnel itself (`iproxy <local-port> <ssh-p
 | `--track all\|static\|dynamic` | Run all phases, only SAST, or only DAST (default `all`) |
 | `--decrypt` | Authorize FairPlay binary decryption in Phase I (off by default; authorized testing only) |
 | `--backup` | Run the slow full device backup in Phase XII (off by default) |
+| `--ai-review` | After the run, auto-run `claude` headless over `ai_review/` to write `final_report.md` |
+| `--mirror` | Open the QuickTime live view without the y/n prompt (blurs anti-capture apps) |
 | `--ssh-port N` | Device SSH port (palera1n=`44`, checkra1n=`22`; default `44`) |
 | `--ssh-pass PW` | Device root SSH password (default `alpine`) |
 | `--local-port N` | Local iproxy port for SSH (default `2222`) |
@@ -154,7 +156,13 @@ Use `--track static` or `--track dynamic` to run only the SAST or DAST phases, o
 
 ```
 output/<bundle_id>/
-├── iOS_DAST_Report_<bundle>_<ts>.md   # final report (AI-ready)
+├── ai_review/                         # ★ self-contained folder to run `claude` on → final_report.md
+│   ├── PROMPT.md · CLAUDE.md          #   triage instructions (false-positive-first, VAPT tickets)
+│   ├── findings.json · report.md      #   findings + human report
+│   ├── screenshots/ (+ index.json)    #   PNG evidence (Claude VIEWS these — no PDF stripping)
+│   ├── logs/                          #   full command log, syslog, keychain dump, grep hits
+│   └── run_review.sh                  #   one command → Claude writes final_report.md
+├── iOS_DAST_Report_<bundle>_<ts>.md   # human report
 ├── findings_<bundle>_<ts>.json        # machine-readable findings
 ├── screenshots/                       # device screenshots (Frida-rendered; idevicescreenshot when a DDI is mountable)
 ├── bundle/                            # pulled .app (Info.plist, binary, class-dump.txt)
@@ -166,6 +174,23 @@ output/<bundle_id>/
 ├── backup/                            # device backup (Phase XII, if --backup)
 └── syslog/                            # captured device logs
 ```
+
+---
+
+## AI Triage (false-positive filtering)
+
+Automated tools over-report. Instead of converting the report to PDF (which strips the screenshots and raw logs an AI needs), every run drops a **self-contained `ai_review/` folder** you point `claude` at directly — it reads `findings.json` + `report.md`, reads the raw `logs/`, and **views every screenshot as an image**, then writes a triaged `final_report.md` as **iOS VAPT tickets**, aggressively filtering false positives (regex keyword hits, third-party-SDK artifacts, jailbreak-only items, OAuth redirect schemes, etc.).
+
+```bash
+# auto: TrashiOS runs Claude for you at the end
+python main.py --bundle com.example.app --ai-review
+
+# or run it yourself, any time:
+cd output/com.example.app/ai_review && ./run_review.sh        # headless → final_report.md
+cd output/com.example.app/ai_review && claude                 # interactive (CLAUDE.md loads the role; say "go")
+```
+
+The triage prompt lives in `ai_review/PROMPT.md`; if you have a `vapt-ticket-writer` skill installed, Claude uses it to format the tickets.
 
 ---
 

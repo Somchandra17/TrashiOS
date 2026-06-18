@@ -25,14 +25,24 @@ def check_tool(name: str) -> bool:
 
 
 def check_tool_version(name: str) -> str:
-    for flag in ["--version", "version", "-V", "-v"]:
+    # Skip lines that are actually errors/usage/warnings so the table shows a real
+    # version or a clean "installed" — never an "illegal option" / traceback line.
+    bad = ("illegal option", "unrecognized option", "unknown option", "unknown command",
+           "invalid option", "usage:", "error:", "userwarning", "deprecated", "traceback",
+           "no such file", "couldn't be opened", "could not be opened", "cannot open", "can't open")
+    for flag in ("--version", "-V", "-v", "version"):
         try:
-            result = subprocess.run([name, flag], capture_output=True, text=True, timeout=10)
-            output = (result.stdout or result.stderr).strip()
-            if output and "unknown command" not in output.lower():
-                return output.splitlines()[0][:80]
+            r = subprocess.run([name, flag], capture_output=True, text=True, timeout=10)
         except Exception:
             continue
+        out = (r.stdout or r.stderr).strip()
+        if not out:
+            continue
+        first = out.splitlines()[0].strip()
+        low = first.lower()
+        if first.startswith("/") or any(m in low for m in bad):
+            continue
+        return first[:80]
     return "installed"
 
 

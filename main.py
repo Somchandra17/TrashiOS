@@ -100,6 +100,8 @@ def parse_args() -> argparse.Namespace:
                         help="Authorize FairPlay binary decryption (frida-ios-dump) in Phase I — authorized testing only")
     parser.add_argument("--backup", action="store_true",
                         help="Run the (slow) full device backup in Phase XII")
+    parser.add_argument("--ai-review", action="store_true",
+                        help="After the run, auto-run `claude` headless over the ai_review/ package to write final_report.md")
     parser.add_argument("--presidio", action="store_true",
                         help="Enable Presidio PII detection (regex + checksum validators); falls back to regex on init failure")
     parser.add_argument("--ner", action="store_true",
@@ -292,8 +294,16 @@ def main() -> int:
         f"  Output dir:  {config.output_dir}",
         title="Summary", style="green", expand=False,
     ))
-    console.print("\n[dim]Tip: feed the generated .md report into an AI model for risk rating, "
-                  "executive summary, and Jira ticket generation.[/dim]\n")
+    # ── Assemble the claude-runnable AI-review package (no PDF; keeps screenshots + raw logs) ──
+    from core.ai_review import assemble_review_package
+    pkg = assemble_review_package(config, device_info, report_path)
+    console.print(f"\n[bold green]AI-review package:[/bold green] {pkg}")
+    if args.ai_review:
+        from core.ai_review import run_claude_review
+        run_claude_review(pkg, console)
+    else:
+        console.print(f"[dim]Triage it with Claude:  cd '{pkg}' && ./run_review.sh   "
+                      f"(or run `claude` there interactively, then say 'go')[/dim]\n")
     return 0
 
 

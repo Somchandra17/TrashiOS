@@ -2,6 +2,31 @@
 
 All notable changes to TrashiOS are documented here.
 
+## [0.3.0] — AI-review package + Frida-native keychain
+
+### Added — AI triage workflow (replaces the report→PDF→AI path)
+- Every run now assembles a self-contained, claude-runnable **`ai_review/`** folder:
+  `PROMPT.md` (false-positive-first triage → iOS VAPT tickets), `CLAUDE.md` (interactive role),
+  `findings.json`, `report.md` (AI-header stripped), `screenshots/` + `index.json` (caption→finding
+  map; Claude VIEWS the PNGs — no PDF stripping), `logs/` (full untruncated command log + syslog +
+  keychain dump + grep hits), and `run_review.sh`. New `core/ai_review.py`.
+- `--ai-review` flag: auto-runs `claude -p … --permission-mode acceptEdits` over the package at the
+  end of a run to produce `final_report.md`.
+- Reframed the report's `AI_PROMPT` so the model's PRIMARY job is separating real findings from
+  false positives (regex keyword hits, third-party-SDK artifacts, jailbreak-only items, OAuth
+  redirect schemes, Swift-binary hardening, empty snapshot/pasteboard), then writing VAPT tickets.
+
+### Fixed
+- **Phase V keychain dump** rewritten Frida-native (`SecItemCopyMatching` across all security
+  classes) — the installed objection's agent throws `'ObjC' is not defined` on Frida 17. Parses
+  account/service/access-group/protection-class(pdmn)/data and assesses kSecAttrAccessible
+  weaknesses (Always / not-ThisDeviceOnly). Verified: 57 items dumped.
+- `_objection_run` used `-S` (Frida-JS-file flag) instead of `-s/--startup-command` for REPL commands.
+
+### Changed
+- QuickTime live view is opt-in: interactive runs prompt y/n with a blur warning (anti-screen-capture
+  apps blur their UI while mirrored); `--mirror` forces it on. Screenshots come from Frida regardless.
+
 ## [0.2.1] — Polish + Frida 17 compatibility
 
 ### Fixed — Frida 17 broke every raw ObjC/Memory agent (root cause of "no screenshots", "memory dump empty", URLs not firing)
