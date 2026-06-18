@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import atexit
 import signal
+import os
 import sys
 import traceback
 import warnings
@@ -302,14 +303,33 @@ def main() -> int:
     # ── Assemble the claude-runnable AI-review package (no PDF; keeps screenshots + raw logs) ──
     from core.ai_review import assemble_review_package
     pkg = assemble_review_package(config, device_info, report_path)
-    run_review = args.ai_review
-    if not run_review and not args.auto:
-        from rich.prompt import Confirm
-        run_review = Confirm.ask("Run the Claude AI-review over the package now?", default=False)
-    if run_review:
-        from core.ai_review import run_claude_review
+    from core.ai_review import run_claude_review, launch_claude_interactive, print_next_steps
+    if args.ai_review:                       # explicit flag → headless, unattended
         run_claude_review(pkg, console)
-    from core.ai_review import print_next_steps
+    elif not args.auto:                      # interactive → let the operator choose
+        from rich.prompt import Prompt
+        console.print(
+            "\n[bold]Triage this evidence package with an AI now?[/bold]\n"
+            "  [cyan]1[/cyan]) Interactive [white]claude[/white] session  "
+            "[dim](recommended — it can ask you to connect the phone / log out and verify live)[/dim]\n"
+            "  [cyan]2[/cyan]) Headless [white]claude[/white]  "
+            "[dim](streaming, unattended — writes final_report.md, no live Q&A)[/dim]\n"
+            "  [cyan]3[/cyan]) Custom / cloud command  "
+            "[dim]($TRASHIOS_REVIEW_CMD — OpenRouter / Ollama / aider)[/dim]\n"
+            "  [cyan]4[/cyan]) Just show me the prompt  [dim](paste into any AI — claude.ai, ChatGPT, …)[/dim]"
+        )
+        choice = Prompt.ask("Choice", choices=["1", "2", "3", "4"], default="1")
+        if choice == "1":
+            launch_claude_interactive(pkg, console)
+        elif choice == "2":
+            run_claude_review(pkg, console)
+        elif choice == "3":
+            if not os.environ.get("TRASHIOS_REVIEW_CMD"):
+                console.print("[yellow]$TRASHIOS_REVIEW_CMD is not set. Set it first, e.g.:[/yellow]\n"
+                              "  [white]export TRASHIOS_REVIEW_CMD='aider --message-file {prompt_file} --yes'[/white]\n"
+                              "[dim]Then re-run, or use ./run_review.sh in the package.[/dim]")
+            else:
+                run_claude_review(pkg, console)
     print_next_steps(pkg, config, console)
     return 0
 

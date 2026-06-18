@@ -112,7 +112,7 @@ The framework starts the SSH-over-USB tunnel itself (`iproxy <local-port> <ssh-p
 | `--track all\|static\|dynamic` | Run all phases, only SAST, or only DAST (default `all`) |
 | `--decrypt` | Authorize FairPlay binary decryption in Phase I (off by default; authorized testing only) |
 | `--backup` | Run the slow full device backup in Phase XII (off by default) |
-| `--ai-review` | After the run, auto-run `claude` headless over `ai_review/` to write `final_report.md` |
+| `--ai-review` | After the run, run the AI review **headless** (streams live activity) over `ai_review/` → `final_report.md`; honors `$TRASHIOS_REVIEW_CMD` |
 | `--mirror` | Open the QuickTime live view without the y/n prompt (blurs anti-capture apps) |
 | `--ssh-port N` | Device SSH port (palera1n=`44`, checkra1n=`22`; default `44`) |
 | `--ssh-pass PW` | Device root SSH password (default `alpine`) |
@@ -179,16 +179,31 @@ output/<bundle_id>/
 
 ## AI Triage (false-positive filtering)
 
-Automated tools over-report. Instead of converting the report to PDF (which strips the screenshots and raw logs an AI needs), every run drops a **self-contained `ai_review/` folder** you point `claude` at directly — it reads `findings.json` + `report.md`, reads the raw `logs/`, and **views every screenshot as an image**, then writes a triaged `final_report.md` as **iOS VAPT tickets**, aggressively filtering false positives (regex keyword hits, third-party-SDK artifacts, jailbreak-only items, OAuth redirect schemes, etc.).
+Automated tools over-report. Instead of converting the report to PDF (which strips the screenshots and raw logs an AI needs), every run drops a **self-contained `ai_review/` folder** an AI works on directly — it reads `findings.json` + `report.md` + the raw `logs/`, **views every screenshot as an image**, and writes a triaged `final_report.md` as **iOS VAPT tickets**, aggressively filtering false positives (regex keyword hits, third-party-SDK artifacts, jailbreak-only items, OAuth redirect schemes, etc.).
+
+At the end of an interactive run you choose how to triage:
+
+| Choice | What it does |
+|---|---|
+| **1) Interactive `claude` session** (default) | Hands you a live session in the package — it can **ask you to connect the iPhone / log the app out and verify findings live** (decode DB & keychain values, re-fire URL schemes logged-out, grep memory), then regenerate the report with confirmed PoCs + embedded evidence. The device stays connected throughout. |
+| **2) Headless `claude`** (`--ai-review`) | Unattended; **streams live activity** (each tool it runs + a cost/duration line) and writes `final_report.md`. No live Q&A. |
+| **3) Custom / cloud command** | Runs `$TRASHIOS_REVIEW_CMD` instead of `claude` — point it at any agentic backend (OpenRouter via aider, an Ollama wrapper, …). |
+| **4) Just show me the prompt** | Prints the prompt + paths to paste into any AI (claude.ai, ChatGPT, …). |
 
 ```bash
-# auto: TrashiOS runs Claude for you at the end
+# unattended: headless review at the end of the run
+python main.py --bundle com.example.app --ai-review
+
+# any agentic backend (OpenRouter / Ollama / aider …):  {prompt_file}=PROMPT.md path, {prompt}=inlined text
+export TRASHIOS_REVIEW_CMD='aider --message-file {prompt_file} --yes'
 python main.py --bundle com.example.app --ai-review
 
 # or run it yourself, any time:
-cd output/com.example.app/ai_review && ./run_review.sh        # headless → final_report.md
-cd output/com.example.app/ai_review && claude                 # interactive (CLAUDE.md loads the role; say "go")
+cd output/com.example.app/ai_review && claude            # interactive — verifies on-device, can ask you questions
+cd output/com.example.app/ai_review && ./run_review.sh   # headless → final_report.md (honors $TRASHIOS_REVIEW_CMD)
 ```
+
+> **Agentic vs. plain chat:** viewing screenshots and running live on-device verification needs a tool with filesystem/image access (Claude Code, aider). A plain cloud chat can still triage the text from `report.md` + `findings.json`, just without image viewing or a live PoC.
 
 The triage prompt lives in `ai_review/PROMPT.md`; if you have a `vapt-ticket-writer` skill installed, Claude uses it to format the tickets.
 

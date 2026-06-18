@@ -31,6 +31,7 @@ import json
 import os
 import shutil
 import subprocess
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -338,9 +339,17 @@ def _write_runner(pkg: Path) -> None:
         "# Run Claude over this evidence package to produce final_report.md.\n"
         "set -euo pipefail\n"
         'cd "$(dirname "$0")"\n'
-        'command -v claude >/dev/null 2>&1 || { echo "claude CLI not found on PATH"; exit 1; }\n'
-        'echo "Running Claude over the review package (reads logs + views all screenshots; may take a few minutes)..."\n'
-        'claude -p "$(cat PROMPT.md)" --permission-mode acceptEdits --output-format text\n'
+        'if [ -n "${TRASHIOS_REVIEW_CMD:-}" ]; then\n'
+        '  echo "Running custom review command: $TRASHIOS_REVIEW_CMD"\n'
+        '  case "$TRASHIOS_REVIEW_CMD" in\n'
+        '    *"{prompt_file}"*) eval "${TRASHIOS_REVIEW_CMD//\\{prompt_file\\}/PROMPT.md}" ;;\n'
+        '    *) eval "$TRASHIOS_REVIEW_CMD \\"$(cat PROMPT.md)\\"" ;;\n'
+        '  esac\n'
+        'else\n'
+        '  command -v claude >/dev/null 2>&1 || { echo "claude not on PATH (or set TRASHIOS_REVIEW_CMD)"; exit 1; }\n'
+        '  echo "Running Claude over the review package (reads logs + views all screenshots; a few minutes)..."\n'
+        '  claude -p "$(cat PROMPT.md)" --permission-mode acceptEdits --output-format text\n'
+        'fi\n'
         'echo\n'
         'echo "Done. Final report: $(pwd)/final_report.md"\n',
         encoding="utf-8",
@@ -353,26 +362,146 @@ def _write_runner(pkg: Path) -> None:
 
 # ── optional auto-run (--ai-review) ──────────────────────────────
 
-def run_claude_review(pkg: Path, console: Console) -> None:
+def run_claude_review(pkg: Path, console: Console, timeout_s: int = 1800) -> None:
+    """Run an AI over the package to write final_report.md, with LIVE progress.
+
+    Provider-agnostic: if $TRASHIOS_REVIEW_CMD is set, that command runs instead of
+    the bundled `claude` CLI, so you can point the review at any agentic backend
+    (e.g. aider on OpenRouter, an Ollama wrapper, a local script). Placeholders:
+    {prompt_file} -> path to PROMPT.md, {prompt} -> its inlined text; if neither is
+    present the PROMPT.md path is appended as the final argument.
+    """
+    prompt_path = pkg / "PROMPT.md"
+    custom = os.environ.get("TRASHIOS_REVIEW_CMD")
+    if custom:
+        import shlex
+        if "{prompt_file}" in custom:
+            cmd = shlex.split(custom.replace("{prompt_file}", str(prompt_path)))
+        elif "{prompt}" in custom:
+            cmd = shlex.split(custom.replace("{prompt}", prompt_path.read_text(encoding="utf-8")))
+        else:
+            cmd = shlex.split(custom) + [str(prompt_path)]
+        console.print(f"[cyan]Running custom review command ($TRASHIOS_REVIEW_CMD):[/cyan] [white]{custom}[/white]")
+        try:
+            subprocess.run(cmd, cwd=str(pkg), timeout=timeout_s)
+        except FileNotFoundError:
+            console.print(f"[yellow]Command not found: {cmd[0]!r}. Check $TRASHIOS_REVIEW_CMD.[/yellow]")
+        except subprocess.TimeoutExpired:
+            console.print(f"[yellow]Review command timed out ({timeout_s // 60} min).[/yellow]")
+        _announce_final(pkg, console)
+        return
+
     if not shutil.which("claude"):
-        console.print("[yellow]`claude` CLI not found on PATH — skipping auto-review. "
-                      f"Run it yourself: cd {pkg} && ./run_review.sh[/yellow]")
+        console.print("[yellow]`claude` CLI not found on PATH — skipping auto-review.\n"
+                      f"  Run it yourself:  cd '{pkg}' && ./run_review.sh\n"
+                      "  Or any backend:   set $TRASHIOS_REVIEW_CMD, or paste PROMPT.md into a cloud model "
+                      "(see 'Next steps' below).[/yellow]")
         return
-    console.print("[cyan]Running Claude over the review package (views all screenshots; may take a few minutes)...[/cyan]")
-    try:
-        prompt = (pkg / "PROMPT.md").read_text(encoding="utf-8")
-        subprocess.run(
-            ["claude", "-p", prompt, "--permission-mode", "acceptEdits", "--output-format", "text"],
-            cwd=str(pkg), timeout=1800,
-        )
-    except subprocess.TimeoutExpired:
-        console.print("[yellow]Claude review timed out (30 min). The package is ready to re-run manually.[/yellow]")
-        return
+
+    _run_claude_streaming(pkg, prompt_path.read_text(encoding="utf-8"), console, timeout_s)
+    _announce_final(pkg, console)
+
+
+def _announce_final(pkg: Path, console: Console) -> None:
     final = pkg / "final_report.md"
     if final.exists():
         console.print(f"[green]✓ Final triaged report: {final}[/green]")
     else:
-        console.print(f"[yellow]Claude finished but final_report.md not found — check output above. Package: {pkg}[/yellow]")
+        console.print(f"[yellow]Finished, but final_report.md was not written — check the output above. "
+                      f"Package: {pkg}[/yellow]")
+
+
+def _tool_summary(inp: dict) -> str:
+    for k in ("file_path", "path", "pattern", "command", "url", "description"):
+        v = inp.get(k)
+        if isinstance(v, str) and v:
+            return (v[:70] + "…") if len(v) > 70 else v
+    return ""
+
+
+def _run_claude_streaming(pkg: Path, prompt: str, console: Console, timeout_s: int) -> None:
+    """Run `claude` headless with stream-json so the operator SEES live activity —
+    every tool the model runs, files it touches, and a final cost/duration line —
+    instead of a silent terminal until the very end."""
+    cmd = ["claude", "-p", prompt, "--permission-mode", "acceptEdits",
+           "--output-format", "stream-json", "--verbose"]
+    console.print("[cyan]Starting AI review — live activity below (runs for several minutes).[/cyan]")
+    console.print("[dim]  A second Claude session is now working in this folder; leave it running.[/dim]\n")
+    start = time.time()
+
+    def _el() -> str:
+        s = int(time.time() - start)
+        return f"{s // 60}m{s % 60:02d}s"
+
+    try:
+        proc = subprocess.Popen(cmd, cwd=str(pkg), stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, text=True, bufsize=1)
+    except FileNotFoundError:
+        console.print("[yellow]`claude` could not be launched.[/yellow]")
+        return
+
+    n_tools = 0
+    try:
+        for line in proc.stdout:
+            if time.time() - start > timeout_s:
+                proc.kill()
+                console.print(f"[yellow]Review exceeded {timeout_s // 60} min — stopped. Re-run ./run_review.sh.[/yellow]")
+                break
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                ev = json.loads(line)
+            except ValueError:
+                continue
+            typ = ev.get("type")
+            if typ == "assistant":
+                for b in ev.get("message", {}).get("content", []):
+                    if b.get("type") == "tool_use":
+                        n_tools += 1
+                        console.print(f"  [dim]{_el()}[/dim] [cyan]●[/cyan] {b.get('name', 'tool')} "
+                                      f"[dim]{_tool_summary(b.get('input', {}))}[/dim]")
+                    elif b.get("type") == "text":
+                        txt = " ".join(b.get("text", "").split())
+                        if txt:
+                            console.print(f"  [dim]{_el()}[/dim] [white]{txt[:140]}[/white]")
+            elif typ == "result":
+                dur = ev.get("duration_ms", 0) // 1000
+                cost = ev.get("total_cost_usd")
+                tail = f", ${cost:.3f}" if isinstance(cost, (int, float)) else ""
+                console.print(f"\n  [green]✔ review finished[/green] [dim]({dur}s, {n_tools} tool calls{tail})[/dim]")
+        proc.wait(timeout=10)
+    except KeyboardInterrupt:
+        proc.kill()
+        console.print("[yellow]Interrupted — partial work left in the package.[/yellow]")
+    except Exception as e:
+        console.print(f"[yellow]Review stream ended: {e}[/yellow]")
+
+
+def launch_claude_interactive(pkg: Path, console: Console) -> None:
+    """Hand the terminal to an INTERACTIVE claude session in the package, seeded
+    with the starter prompt. Unlike the headless path this can ask the operator
+    questions mid-review ("connect the iPhone", "log the app out", "shall I verify
+    this finding live?") and run the on-device verification with the operator in the
+    loop — the whole point of the live-verification step. The tool stays alive while
+    the session runs (device bridges stay up), and resumes when the operator exits.
+    """
+    if not shutil.which("claude"):
+        console.print("[yellow]`claude` CLI not found on PATH. Start a session yourself:\n"
+                      f"  cd '{pkg}' && claude[/yellow]")
+        return
+    console.print("[cyan]Launching an interactive Claude session in the evidence package…[/cyan]")
+    console.print("[dim]  It can ask you to connect the iPhone / log the app out and verify findings live.\n"
+                  "  Keep the phone plugged in. Type /exit (or Ctrl-D) when the report is done.[/dim]\n")
+    try:
+        # Positional prompt → interactive REPL seeded with it; acceptEdits so report/evidence
+        # writes don't prompt, while device/bash actions still ask (operator stays in control).
+        subprocess.run(["claude", STARTER_PROMPT, "--permission-mode", "acceptEdits"], cwd=str(pkg))
+    except FileNotFoundError:
+        console.print("[yellow]`claude` could not be launched.[/yellow]")
+    except KeyboardInterrupt:
+        pass
+    _announce_final(pkg, console)
 
 
 def print_next_steps(pkg: Path, config, console: Console) -> None:
@@ -388,18 +517,23 @@ def print_next_steps(pkg: Path, config, console: Console) -> None:
         lines.append(f"[green]Final report already written:[/green] {final.resolve()}")
     lines += [
         "",
-        "[bold]1) Hand the package to an AI to triage — pick one:[/bold]",
-        f"   • Claude Code (best — it reads the screenshots and can verify on-device):",
-        f"       [white]cd '{pkg}' && claude[/white]   [dim]then paste the prompt below (or just say: follow PROMPT.md)[/dim]",
+        "[bold]1) Hand the package to an AI to triage — pick a backend:[/bold]",
+        "   • [bold]Claude Code[/bold] (best — reads the screenshots, can verify on-device):",
+        f"       [white]cd '{pkg}' && claude[/white]   [dim]then say: follow PROMPT.md[/dim]",
         f"       [white]cd '{pkg}' && ./run_review.sh[/white]   [dim]headless → writes final_report.md[/dim]",
-        f"   • Any other AI/chat: upload [white]PROMPT.md[/white] + [white]findings.json[/white] + the "
-        f"[white]screenshots/[/white] and [white]logs/[/white] folders, then paste the prompt.",
+        "   • [bold]Any other agentic backend[/bold] (OpenRouter / Ollama / aider / custom CLI):",
+        "       [white]export TRASHIOS_REVIEW_CMD='aider --message-file {prompt_file} --yes'[/white]",
+        "       [dim]then ./run_review.sh (or re-run with --ai-review). {prompt_file}=PROMPT.md path, {prompt}=inlined text.[/dim]",
+        "   • [bold]A plain cloud chat[/bold] (claude.ai / ChatGPT / OpenRouter web): paste [white]PROMPT.md[/white] + "
+        "[white]report.md[/white].",
+        "       [dim]Caveat: a non-agentic chat can triage the text but can't VIEW the screenshots or run the live "
+        "on-device checks — use an agentic CLI above for the full job.[/dim]",
         "",
         "[bold]2) Prompt to give the AI:[/bold]",
         f"   [italic]{STARTER_PROMPT}[/italic]",
         "",
         "[bold]3) Then:[/bold] review [white]final_report.md[/white]. For every 'Likely' finding the AI will "
-        "OFFER to verify it live on the connected jailbroken iPhone (decode DB/keychain values, re-fire URL "
+        "verify it live on the connected jailbroken iPhone (decode DB/keychain values, re-fire URL "
         "schemes logged-out, grep memory) and regenerate the report with a confirmed PoC + evidence.",
     ]
     console.print(Panel("\n".join(lines), title="Next steps — AI triage", style="cyan", expand=False))

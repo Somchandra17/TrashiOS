@@ -384,14 +384,19 @@ rpc.exports = {
 };
 """
 
-    def dump_memory(self, out_path: str, max_mb: int = 256, per_range_mb: int = 16) -> RuntimeResult:
+    def dump_memory(self, out_path: str, max_mb: int = 64, per_range_mb: int = 4,
+                    timeout_s: int = 120, on_progress=None) -> RuntimeResult:
         """Dump rw- process memory ranges to a file via Frida (the fridump equivalent).
 
-        Captures the real failure reason (attach refused, script destroyed by an
-        anti-tamper/MAM app, no readable ranges) instead of a generic 'empty'.
+        Reads in small chunks under a wall-clock deadline and a watchdog thread so a
+        slow or wedged transfer (anti-tamper / silently-detached session) can never
+        hang the run: on timeout the session is detached — which unsticks any read
+        still pending in the worker — and whatever was captured is returned as a
+        partial dump. Reports the real failure reason (attach refused, script
+        destroyed by anti-tamper/MAM, no readable ranges).
         """
         try:
-            import frida, time
+            import frida, time, threading
         except Exception as e:
             return RuntimeResult("frida", "dump_memory", "", f"frida python binding unavailable: {e}", False)
 
@@ -414,41 +419,71 @@ rpc.exports = {
                                  False)
 
         agent_errors: list[str] = []
-        try:
-            script = session.create_script(self._MEMDUMP_JS)
-            script.on("message", lambda m, d: agent_errors.append(m.get("description", "")) if m.get("type") == "error" else None)
-            script.load()
-            exports = getattr(script, "exports_sync", None) or script.exports
-            ranges = exports.ranges("rw-")
-            total = 0; written = 0; first_err = None
-            cap = max_mb * 1024 * 1024
-            per_cap = per_range_mb * 1024 * 1024
-            with open(out_path, "wb") as fh:
-                for base, size in ranges:
-                    if total >= cap:
-                        break
-                    size = min(int(size), per_cap, cap - total)
-                    if size <= 0:
-                        continue
-                    try:
-                        data = exports.read(base, size)
-                    except Exception as e:
-                        first_err = first_err or str(e)
-                        continue
-                    if data:
-                        fh.write(data); total += len(data); written += 1
+        state = {"total": 0, "reads": 0, "ranges": 0, "first_err": None, "done": False}
+        cap = max_mb * 1024 * 1024
+        per_cap = per_range_mb * 1024 * 1024
+        deadline = time.time() + timeout_s
+
+        def _worker():
             try:
-                session.detach()
-            except Exception:
-                pass
-            if total == 0:
-                reason = first_err or (agent_errors[0] if agent_errors else f"no readable rw- ranges ({len(ranges)} seen)")
-                return RuntimeResult("frida", "dump_memory", "", reason, False)
-            return RuntimeResult("frida", "dump_memory",
-                                 f"{total} bytes from {written} ranges -> {out_path}", "", True)
-        except Exception as e:
-            return RuntimeResult("frida", "dump_memory", "",
-                                 f"script error ({e}) — process may have detached (anti-tamper)", False)
+                script = session.create_script(self._MEMDUMP_JS)
+                script.on("message", lambda m, d: agent_errors.append(m.get("description", "")) if m.get("type") == "error" else None)
+                script.load()
+                exports = getattr(script, "exports_sync", None) or script.exports
+                ranges = exports.ranges("rw-")
+                state["ranges"] = len(ranges)
+                last_mb = 0
+                with open(out_path, "wb") as fh:
+                    for base, size in ranges:
+                        if state["total"] >= cap or time.time() >= deadline:
+                            break
+                        start = int(base, 16) if isinstance(base, str) else int(base)
+                        size = int(size)
+                        off = 0
+                        # Chunk each range so every RPC read is small (fast, finer deadline granularity).
+                        while off < size and state["total"] < cap and time.time() < deadline:
+                            chunk = min(per_cap, size - off, cap - state["total"])
+                            if chunk <= 0:
+                                break
+                            try:
+                                data = exports.read(hex(start + off), chunk)
+                            except Exception as e:
+                                state["first_err"] = state["first_err"] or str(e)
+                                break
+                            off += chunk
+                            if data:
+                                fh.write(data); state["total"] += len(data); state["reads"] += 1
+                            mb = state["total"] // (1024 * 1024)
+                            if on_progress and mb != last_mb:
+                                last_mb = mb
+                                try:
+                                    on_progress(mb)
+                                except Exception:
+                                    pass
+            except Exception as e:
+                state["first_err"] = state["first_err"] or f"script error ({e}) — process may have detached (anti-tamper)"
+            finally:
+                state["done"] = True
+
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+        t.join(timeout=timeout_s + 5)
+        timed_out = not state["done"]
+        try:
+            session.detach()  # unsticks any read still pending in the worker thread
+        except Exception:
+            pass
+        if timed_out:
+            t.join(timeout=3)
+
+        if state["total"] == 0:
+            reason = state["first_err"] or (agent_errors[0] if agent_errors else (
+                f"timed out after {timeout_s}s with no readable data (process may be wedged / anti-tamper)"
+                if timed_out else f"no readable rw- ranges ({state['ranges']} seen)"))
+            return RuntimeResult("frida", "dump_memory", "", reason, False)
+        note = " (partial — hit the time budget)" if timed_out else ""
+        return RuntimeResult("frida", "dump_memory",
+                             f"{state['total']} bytes from {state['reads']} reads -> {out_path}{note}", "", True)
 
     # ── pasteboard monitor (the Pasteboard phase) ────────────────
 

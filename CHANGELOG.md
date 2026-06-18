@@ -2,6 +2,26 @@
 
 All notable changes to TrashiOS are documented here.
 
+## [0.3.2] — Live AI-review, provider-agnostic backends, no more memory hangs
+
+### AI-review workflow
+- The end-of-run choice is now a 4-way menu: **(1) interactive `claude` session** (default),
+  (2) headless `claude`, (3) custom/cloud command, (4) print the prompt.
+- **Interactive session handoff** (`launch_claude_interactive`): the tool hands you a live `claude`
+  REPL in the package so the AI can *ask you* to connect the iPhone / log the app out and run the
+  live on-device verification with you in the loop — the device bridges stay up while it runs, and
+  the tool resumes when you exit. (Headless `-p` can't ask anything; it's now the unattended option.)
+- **Live activity** for the headless path: switched to `--output-format stream-json --verbose` and a
+  parser that prints each tool the model runs + a final duration/cost line — no more silent terminal.
+- **Provider-agnostic** `$TRASHIOS_REVIEW_CMD`: run the review through any agentic backend
+  (OpenRouter via aider, an Ollama wrapper, a custom CLI). Placeholders `{prompt_file}` / `{prompt}`;
+  honored by the menu, `--ai-review`, and `run_review.sh`.
+
+### Fixes
+- **Phase IX no longer hangs.** `dump_memory` rewritten to read in small (4 MB) chunks under a
+  wall-clock deadline + watchdog thread; on timeout it detaches the session (unsticking any wedged
+  read) and returns a partial dump. Live `… N MB captured` progress; clear partial/timeout reasons.
+
 ## [0.3.1] — AI-review polish + fixes
 
 ### AI-review package

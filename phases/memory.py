@@ -48,8 +48,13 @@ def run_memory_analysis(config: Config, device: IOSDevice, frida: FridaBridge) -
         time.sleep(4)
 
     dump_path = config.output_dir / "memory" / "memory_dump.bin"
-    console.print(f"  [cyan]Dumping process memory via Frida (cap {LIMITS.max_dump_mb} MB)...[/cyan]")
-    res = frida.dump_memory(str(dump_path), max_mb=LIMITS.max_dump_mb)
+    console.print(f"  [cyan]Dumping process memory via Frida (cap {LIMITS.max_dump_mb} MB, ~2 min budget)...[/cyan]")
+    _last = [0]
+    def _progress(mb):
+        if mb >= _last[0] + 8:
+            _last[0] = mb
+            console.print(f"    [dim]… {mb} MB captured[/dim]")
+    res = frida.dump_memory(str(dump_path), max_mb=LIMITS.max_dump_mb, on_progress=_progress)
     config.log_command(PHASE, "frida: dump rw- ranges", res.stdout or res.stderr)
 
     if res.success and dump_path.exists() and dump_path.stat().st_size > 0:
