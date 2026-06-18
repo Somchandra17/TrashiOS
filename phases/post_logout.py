@@ -13,13 +13,11 @@ from __future__ import annotations
 
 import re
 import time
-from pathlib import Path
 
 from rich.console import Console
 from rich.panel import Panel
-from rich.prompt import Confirm
 
-from core.config import Config, SENSITIVE_PATTERNS
+from core.config import Config
 from core.ios_device import IOSDevice
 from core.frida_bridge import FridaBridge
 from core.screenshot import ScreenshotManager

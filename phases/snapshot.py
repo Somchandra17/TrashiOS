@@ -12,9 +12,6 @@ Grounded in OWASP MASTG-TEST-0009, MASVS-STORAGE-2 / PLATFORM-3.
 
 from __future__ import annotations
 
-import time
-from pathlib import Path
-
 from rich.console import Console
 from rich.panel import Panel
 

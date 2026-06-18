@@ -4,7 +4,6 @@ Global configuration and shared state for the iOS DAST framework (TrashiOS).
 
 from __future__ import annotations
 
-import os
 import re
 from dataclasses import dataclass, field
 from datetime import datetime

@@ -278,6 +278,11 @@ def main() -> int:
     screenshotter.stop_mirror()
 
     # ── Generate report ──
+    if not args.auto:
+        from rich.prompt import Confirm
+        config.report_mode = "internal" if Confirm.ask(
+            "Include the AI-prompt header in the report (internal mode)?",
+            default=(args.report == "internal")) else "client"
     console.print("\n[bold cyan]═══ Generating Report ═══[/bold cyan]\n")
     reporter = ReportGenerator(config, device_info)
     report_path = reporter.generate()
@@ -297,13 +302,15 @@ def main() -> int:
     # ── Assemble the claude-runnable AI-review package (no PDF; keeps screenshots + raw logs) ──
     from core.ai_review import assemble_review_package
     pkg = assemble_review_package(config, device_info, report_path)
-    console.print(f"\n[bold green]AI-review package:[/bold green] {pkg}")
-    if args.ai_review:
+    run_review = args.ai_review
+    if not run_review and not args.auto:
+        from rich.prompt import Confirm
+        run_review = Confirm.ask("Run the Claude AI-review over the package now?", default=False)
+    if run_review:
         from core.ai_review import run_claude_review
         run_claude_review(pkg, console)
-    else:
-        console.print(f"[dim]Triage it with Claude:  cd '{pkg}' && ./run_review.sh   "
-                      f"(or run `claude` there interactively, then say 'go')[/dim]\n")
+    from core.ai_review import print_next_steps
+    print_next_steps(pkg, config, console)
     return 0
 
 

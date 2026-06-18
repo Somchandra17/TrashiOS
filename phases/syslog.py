@@ -26,7 +26,11 @@ console = Console()
 PHASE = "Phase VIII — Device Log Monitoring"
 
 _HTTP_RE = re.compile(r"http://[^\s\"'<>]+", re.IGNORECASE)
-_SQL_RE = re.compile(r"\b(SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM|CREATE\s+TABLE)\b", re.IGNORECASE)
+# Require real SQL context (paired keywords) so plain words like "update" in a log line don't match.
+_SQL_RE = re.compile(
+    r"\b(SELECT\b.{1,200}?\bFROM\b|INSERT\s+INTO\b|UPDATE\b.{1,120}?\bSET\b|DELETE\s+FROM\b|CREATE\s+TABLE\b)",
+    re.IGNORECASE,
+)
 _EXC_RE = re.compile(r"(NSException|EXC_BAD_ACCESS|Fatal error|\*\*\* Terminating|"
                      r"unrecognized selector|Traceback|crash)", re.IGNORECASE)
 

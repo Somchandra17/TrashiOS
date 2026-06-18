@@ -35,10 +35,19 @@ from datetime import datetime
 from pathlib import Path
 
 from rich.console import Console
+from rich.panel import Panel
 
 from core.report import AI_PROMPT, _dedupe_findings
 
 console = Console()
+
+# Copy-pasteable starter prompt the operator can give Claude (or any AI) to begin the triage.
+STARTER_PROMPT = (
+    "You are triaging an iOS pentest evidence package. Read PROMPT.md in this folder and follow it "
+    "exactly: triage findings.json (aggressively filter false positives), VIEW every screenshot, then "
+    "for each Likely finding offer to verify it live on the connected jailbroken iPhone and run the "
+    "checks yourself, and write final_report.md as iOS VAPT tickets with the screenshot evidence embedded."
+)
 
 _SEV_ORDER = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3, "Info": 4}
 
@@ -364,3 +373,33 @@ def run_claude_review(pkg: Path, console: Console) -> None:
         console.print(f"[green]✓ Final triaged report: {final}[/green]")
     else:
         console.print(f"[yellow]Claude finished but final_report.md not found — check output above. Package: {pkg}[/yellow]")
+
+
+def print_next_steps(pkg: Path, config, console: Console) -> None:
+    """End-of-run guidance: where the output is, the prompt to give the AI, and how to proceed."""
+    final = pkg / "final_report.md"
+    lines = [
+        f"[bold]Operator:[/bold]      {os.environ.get('USER', '?')}",
+        f"[bold]Target:[/bold]        {config.bundle_id}",
+        f"[bold]Output dir:[/bold]    {config.output_dir.resolve()}",
+        f"[bold]AI-review pkg:[/bold] {pkg.resolve()}",
+    ]
+    if final.exists():
+        lines.append(f"[green]Final report already written:[/green] {final.resolve()}")
+    lines += [
+        "",
+        "[bold]1) Hand the package to an AI to triage — pick one:[/bold]",
+        f"   • Claude Code (best — it reads the screenshots and can verify on-device):",
+        f"       [white]cd '{pkg}' && claude[/white]   [dim]then paste the prompt below (or just say: follow PROMPT.md)[/dim]",
+        f"       [white]cd '{pkg}' && ./run_review.sh[/white]   [dim]headless → writes final_report.md[/dim]",
+        f"   • Any other AI/chat: upload [white]PROMPT.md[/white] + [white]findings.json[/white] + the "
+        f"[white]screenshots/[/white] and [white]logs/[/white] folders, then paste the prompt.",
+        "",
+        "[bold]2) Prompt to give the AI:[/bold]",
+        f"   [italic]{STARTER_PROMPT}[/italic]",
+        "",
+        "[bold]3) Then:[/bold] review [white]final_report.md[/white]. For every 'Likely' finding the AI will "
+        "OFFER to verify it live on the connected jailbroken iPhone (decode DB/keychain values, re-fire URL "
+        "schemes logged-out, grep memory) and regenerate the report with a confirmed PoC + evidence.",
+    ]
+    console.print(Panel("\n".join(lines), title="Next steps — AI triage", style="cyan", expand=False))

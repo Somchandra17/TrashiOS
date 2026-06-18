@@ -2,6 +2,32 @@
 
 All notable changes to TrashiOS are documented here.
 
+## [0.3.1] — AI-review polish + fixes
+
+### AI-review package
+- `final_report.md` now uses the operator's finding-field format (Severity / Status / Confidence /
+  CVSS (estimated) / CVSS Vector / Business Impact / Description / Proof of Concept / Remediation)
+  and embeds evidence screenshots inline.
+- PROMPT.md / CLAUDE.md instruct the AI to DRIVE automated live verification: ask the operator to
+  connect the jailbroken iPhone, run each Likely check itself (decode DB & keychain values, re-fire
+  URL schemes logged-out + screenshot, grep memory), capture fresh evidence, and regenerate a
+  polished report with confirmed PoCs.
+- End-of-run prints a "Next steps" panel (operator, output dir, package path, the prompt to give
+  Claude/any AI, and how to proceed).
+
+### CLI / UX
+- Interactive y/n prompts (when not `--auto` and the flag is omitted): report detail (client/internal)
+  and "run the AI-review now?".
+
+### Fixes
+- `--presidio` / `--ner` no longer crash when the spaCy model is missing: spaCy exits via
+  `SystemExit` (not an `Exception`), now caught — `--presidio` falls back to regex, `--ner` aborts
+  cleanly, both with install hints.
+- Device-log SQL detector no longer false-positives on the word "update" in a log line — requires
+  real SQL context (`SELECT…FROM`, `UPDATE…SET`, `INSERT INTO`, `DELETE FROM`, `CREATE TABLE`).
+- Removed dead imports across the codebase; trimmed `core/__init__.py` re-exports (also stops eager
+  import of every core submodule).
+
 ## [0.3.0] — AI-review package + Frida-native keychain
 
 ### Added — AI triage workflow (replaces the report→PDF→AI path)

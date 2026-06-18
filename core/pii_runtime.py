@@ -58,18 +58,23 @@ def initialize_pii_detection(config: Config, use_presidio: bool, use_ner: bool, 
         presidio_engine = init_engine(use_gliner=use_ner)
         _ = presidio_engine.analyzer
         config.presidio_engine = presidio_engine
-    except Exception as e:
+    except (Exception, SystemExit) as e:
+        # NB: spaCy's model auto-download fails via sys.exit() (a SystemExit, NOT an Exception),
+        # so we must catch SystemExit here or --presidio/--ner would crash instead of degrading.
         config.presidio_engine = None
+        reason = (f"spaCy NLP model unavailable / auto-download failed (exit {e})"
+                  if isinstance(e, SystemExit) else str(e))
         if use_ner:
-            console.print(f"[red]GLiNER initialization failed: {e}[/red]")
+            console.print(f"[red]GLiNER/Presidio initialization failed: {reason}[/red]")
             console.print(
                 "[red]--ner requires a working GLiNER backend and cannot fall back.[/red]\n"
-                "  Ensure dependencies are installed: [white]pip install -r requirements-ner.txt[/white]\n"
-                "  Then retry to allow first-time model download (urchade/gliner_multi_pii-v1)."
+                "  Install deps: [white]pip install -r requirements-ner.txt[/white]\n"
+                "  And the spaCy model: [white]python3 -m spacy download en_core_web_lg[/white]"
             )
             return 1
-        console.print(f"[red]Presidio initialization failed: {e}[/red]")
-        console.print("[yellow]Falling back to regex-only PII scanning.[/yellow]")
+        console.print(f"[red]Presidio initialization failed: {reason}[/red]")
+        console.print("[yellow]Falling back to regex-only PII scanning. For full Presidio, install the "
+                      "spaCy model: [white]python3 -m spacy download en_core_web_lg[/white][/yellow]")
         return 0
 
     if use_ner:
