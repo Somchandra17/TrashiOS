@@ -2,6 +2,13 @@
 
 All notable changes to TrashiOS are documented here.
 
+## [0.3.5] — Actionable/Non-actionable split + embedded VAPT reporting standard
+
+### Changed — AI-review report structure
+- The triage table now has an explicit **Action** column (Actionable vs Non-actionable). Reports detail a full VAPT ticket for each **Actionable** finding and list **every** Non-actionable item (false positives + informational) as one concise line each — nothing is dropped.
+- The **VAPT reporting standard is now embedded in the prompt** (ticket field order, CVSS score/band consistency, iOS AV:L vs AV:N calibration, root-cause CWE selection, concrete-mitigation voice) so the review no longer depends on the external `vapt-ticket-writer` skill being installed.
+- The HTML report is instructed to stay **simple and functional** (minimal CSS, no high-end design) to keep it neat and token-cheap.
+
 ## [0.3.4] — HTML report from AI review
 
 ### Changed — AI-review output
