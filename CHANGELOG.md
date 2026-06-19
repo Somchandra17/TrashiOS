@@ -2,6 +2,11 @@
 
 All notable changes to TrashiOS are documented here.
 
+## [0.3.4] — HTML report from AI review
+
+### Changed — AI-review output
+- The AI-review prompt (`PROMPT.md` / `CLAUDE.md` / `STARTER_PROMPT`) now instructs the reviewer to produce **both** `final_report.md` **and** a self-contained `final_report.html` — identical content, every evidence image embedded inline as a base64 data URI, clean inline CSS, and **nothing redacted** (full secret values per the authorized-UAT scope). The HTML renders standalone when shared.
+
 ## [0.3.3] — uiopen on rootless jailbreaks + unredacted UAT evidence
 
 ### Fixed

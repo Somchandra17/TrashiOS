@@ -47,7 +47,7 @@ STARTER_PROMPT = (
     "You are triaging an iOS pentest evidence package. Read PROMPT.md in this folder and follow it "
     "exactly: triage findings.json (aggressively filter false positives), VIEW every screenshot, then "
     "for each Likely finding offer to verify it live on the connected jailbroken iPhone and run the "
-    "checks yourself, and write final_report.md as iOS VAPT tickets with the screenshot evidence embedded. "
+    "checks yourself, and write final_report.md as iOS VAPT tickets with the screenshot evidence embedded, plus a self-contained final_report.html (same content, evidence images embedded inline, nothing redacted). "
     "Authorized UAT engagement: record FULL secret values verbatim in the evidence — do NOT redact, "
     "mask, or truncate them."
 )
@@ -267,7 +267,16 @@ HOW TO WORK (finding-by-finding):
   4. Cite the finding `id` and the exact screenshot filename / log line in your justification.
   5. WRITE your output to `final_report.md` in THIS directory.
 
-FINAL REPORT (`final_report.md`):
+FINAL REPORT — produce BOTH files, identical content, NOTHING redacted:
+  • `final_report.md`   — Markdown (sections A–D below); embed evidence with ![](screenshots/<file>).
+  • `final_report.html` — a SELF-CONTAINED HTML version of the SAME report: embed EVERY evidence image
+    inline as a base64 data URI (<img src="data:image/png;base64,...">) so it renders standalone when
+    shared or opened anywhere (do NOT depend on the screenshots/ folder being present). Add clean inline
+    CSS: readable headings, a severity-colored triage table, monospace blocks for PoC/log snippets, and
+    images capped to a sensible max-width. You may downscale very large screenshots to keep the file
+    reasonable, but NEVER omit or redact evidence — include full secret values verbatim (UAT scope above).
+
+Content of BOTH files:
   A. Executive summary (2-4 sentences): real risk posture, noise excluded.
   B. Triage table (EVERY finding): ID | Finding | Verdict (Confirmed/Likely/FP/Info) | Real severity | One-line reason.
   C. For each CONFIRMED or LIKELY finding, a finding block in THIS EXACT field format
@@ -331,7 +340,7 @@ def _write_claude_md(pkg: Path) -> None:
         "4. Write `final_report.md` using the operator's finding-field format (Severity / Status / "
         "Confidence / CVSS (estimated) / CVSS Vector (estimated) / Business Impact / Description / "
         "Proof of Concept / Remediation), and EMBED supporting screenshots inline with "
-        "`![caption](screenshots/<file>)`.\n"
+        "`![caption](screenshots/<file>)`. ALSO write `final_report.html` — the same report as a self-contained HTML file with every evidence image embedded inline (base64 data URI) and NOTHING redacted.\n"
         "5. DRIVE automated live verification (the core of the job): ask the operator to connect the "
         "jailbroken iPhone, then for EVERY Likely / needs-validation finding run the proof yourself — "
         "reuse the TrashiOS bridges at the repo root `../../..` (IOSDevice, FridaBridge) or raw "
