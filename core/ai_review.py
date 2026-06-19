@@ -217,6 +217,96 @@ def _copy_report(report_path, pkg: Path) -> None:
 
 # ── PROMPT.md ────────────────────────────────────────────────────
 
+_VAPT_STANDARD = """\
+────────────────────────────────────────────────────────────────────────────
+TICKET FORMAT (use for EVERY finding in section C - match this field order exactly):
+
+    ### <n>. <Finding Title>
+    - **Status:** Open
+    - **Confidence:** Confirmed | Likely
+    - **Severity:** <Critical | High | Medium | Low>  (business-informed)
+    - **CVSS Severity:** <band from the score>
+    - **CWE / OWASP:** <root-cause CWE-...> · MASVS-... · MASTG-...
+    - **CVE:** Not Applicable | <CVE-id>
+    - **CVSS Score:** <number> <Band>
+    - **CVSS Vector:** `CVSS:3.1/AV:.../AC:.../PR:.../UI:.../S:.../C:.../I:.../A:...`   (score MUST match the vector)
+    - **Business-Informed Severity:** <may differ from the CVSS technical score; justify if so>
+    - **Severity Justification:** <why this severity; device-local vs network reach; any chaining>
+    - **Affected:** <bundle id / file / URL scheme / keychain item - and HTTP method + Endpoint + Host if it is a network finding>
+    - **Description:** <what it is + the EXACT evidence you saw: decoded values, log lines, requests/responses>
+    - **Impact:** <technical-consequence bullets - the data/types actually exposed>
+    - **Business Impact:** <operational / reputational / financial bullets; note if jailbroken/physical access is required>
+    - **Mitigation:** <concrete, code-level actions + the expected hardened behavior>
+    - **Proof of Concept:** <numbered steps with the real values/requests, and EMBED each supporting
+          screenshot inline: ![<caption>](screenshots/<file>)>
+
+REPORTING STANDARD (authoritative - applies to every ticket; no external skill required):
+  - NEVER fabricate endpoints, payloads, tokens, roles, responses, or steps not in the evidence.
+    Preserve the tester's real values verbatim (full, unredacted - UAT scope above).
+  - CVSS: the numeric Score MUST match the CVSS:3.1 Vector exactly, and the Severity band MUST match the
+    score. A vector with C:N/I:N/A:N scores 0.0 -> Informational.
+        Bands: Critical 9.0-10.0 . High 7.0-8.9 . Medium 4.0-6.9 . Low 0.1-3.9 . Informational 0.0
+  - CVSS calibration for iOS (be realistic about attack prerequisites):
+        AV:L for on-device / physical / jailbroken-only exploitation (most client-side storage, keychain,
+        memory, snapshot findings) - this LOWERS real-world severity; reflect it honestly.
+        AV:N only for genuinely remote reach (ATS cleartext, missing TLS pinning, universal links / API).
+        AC:L unless a race/uncommon precondition is needed . PR:N none / PR:L user / PR:H privileged .
+        UI:R if victim interaction needed . S:C only if exploitation crosses a trust boundary .
+        C/I/A = H/L/N strictly from demonstrated impact.
+  - CWE = the ROOT weakness, not the symptom:
+        Missing Authorization = CWE-862 . IDOR = CWE-639 . Information Disclosure = CWE-200 .
+        Insecure Storage = CWE-922 / CWE-312 . Cleartext Transmission = CWE-319 .
+        Improper Authentication = CWE-287 . SSRF = CWE-918 . SQLi = CWE-89 . XSS = CWE-79.
+        Add MASVS/MASTG ids when clearly relevant.
+  - Mitigations must be CONCRETE and code-level.
+        Good: "On logout call SecItemDelete for the token item, and store it with
+               kSecAttrAccessibleWhenUnlockedThisDeviceOnly; confirm it is absent after logout."
+        Bad:  "Follow secure coding best practices."
+  - Claim only what the evidence demonstrates. Secure/accepted behavior, or metadata-only exposure with
+    no real data -> Informational/design-observation (Non-actionable), never an inflated severity.
+  - Voice: "Testing confirmed...", "This indicates...", "No direct security impact identified" for secure
+    behavior. Avoid hype ("attacker can now...", "complete compromise", "critical - immediate action").
+
+SELF-VALIDATION before you finish (every ticket):
+  [ ] Score matches the vector AND the band; no nonzero score with C:N/I:N/A:N.
+  [ ] CWE is the root weakness; MASVS/MASTG only where they fit.
+  [ ] Mitigation is specific (exact API/check/config), not generic.
+  [ ] Title, severity, description, impact, mitigation, PoC all describe the SAME weakness.
+  [ ] Every claim traces to evidence in this package or to what you verified live.
+
+WORKED EXAMPLE (style reference - adapt to the real finding; do not copy verbatim):
+
+    ### 1. Insecure Storage: session refresh token persists in the keychain after logout
+    - **Status:** Open
+    - **Confidence:** Confirmed
+    - **Severity:** Medium
+    - **CVSS Severity:** Medium
+    - **CWE / OWASP:** CWE-922: Insecure Storage of Sensitive Information . MASVS-STORAGE-2 . MASTG-TEST-0055
+    - **CVE:** Not Applicable
+    - **CVSS Score:** 4.0 Medium
+    - **CVSS Vector:** `CVSS:3.1/AV:L/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N`
+    - **Business-Informed Severity:** Medium
+    - **Severity Justification:** Recovery needs local/jailbroken device access (AV:L) so real-world reach
+      is limited, but the recovered item is a live refresh token, so confidentiality impact is High.
+    - **Affected:** keychain item svc=com.app.auth acct=refresh_token (com.example.app)
+    - **Description:** Testing confirmed the refresh token remains in the keychain after logout. Dumped via
+      SecItemCopyMatching post-logout; the value base64-decoded to a valid JWT (exp 2026-09-01).
+    - **Impact:**
+      - A party with device access recovers a still-valid session token after the user has logged out.
+    - **Business Impact:**
+      - Session continuity for an attacker holding the device; bounded by requiring local access.
+    - **Mitigation:** On logout, SecItemDelete the token item; store it with
+      kSecAttrAccessibleWhenUnlockedThisDeviceOnly. Confirm the item is absent post-logout.
+    - **Proof of Concept:**
+      1. Log in, background, log out.
+      2. Dump keychain -> items still include refresh_token.
+      3. base64-decode the value -> a valid, unexpired JWT.
+      ![keychain dump after logout](screenshots/keychain_post_logout.png)
+
+If a `vapt-ticket-writer` skill is also installed you may use it, but this standard is authoritative.
+"""
+
+
 def _write_prompt(config, device_info: dict, findings: list[dict], pkg: Path) -> None:
     counts = {k: 0 for k in _SEV_ORDER}
     for f in findings:
@@ -278,90 +368,48 @@ FINAL REPORT — produce BOTH files, identical content, NOTHING redacted:
     content and evidence over visual flourish — clean and skimmable, not over-designed. You may downscale very large screenshots to keep the file
     reasonable, but NEVER omit or redact evidence — include full secret values verbatim (UAT scope above).
 
-Content of BOTH files:
-  A. EXECUTIVE SUMMARY (2-4 sentences): the real risk posture with noise excluded — how many findings
-     are Actionable vs Non-actionable, and the top real issue(s).
+Content of BOTH files (identical content; NOTHING redacted):
+  A. EXECUTIVE SUMMARY (3-5 sentences): real risk posture with noise excluded — counts by real
+     severity, how many findings are Actionable vs Non-actionable, and the top real issue(s).
 
-  B. TRIAGE TABLE — EVERY finding, one row each, with an explicit Action flag:
-       ID | Finding | Verdict (Confirmed/Likely/False Positive/Informational) | Severity | Action | One-line reason
-     • Action = "Actionable"     -> Confirmed/Likely real weaknesses that need a fix or follow-up.
-     • Action = "Non-actionable" -> False Positives (noise) and Informational/design-observations
-       (true but not a vulnerability — note-only / hardening).
-     Nothing is omitted: ALL findings appear here regardless of verdict.
+  B. TRIAGE TABLE — EVERY finding, one row each:
+       ID | Finding | Verdict (Confirmed/Likely/False Positive/Informational) | Real Severity | Action | One-line reason
+     - Real Severity = your TRIAGED severity (Critical/High/Medium/Low/Informational), NOT the tool's raw guess.
+     - Action = "Actionable" (needs a fix) or "Non-actionable" (False Positive, or Informational note-only).
+     Omit nothing - all findings appear here.
 
-  C. ACTIONABLE FINDINGS — a full VAPT ticket for EACH Actionable finding, in THIS field order
-     (per the REPORTING STANDARD below), with evidence images embedded:
+  C. FINDINGS (full write-ups) — document EVERY finding whose triaged Real Severity is
+     Critical, High, Medium, OR Low (i.e. everything EXCEPT Informational and False Positives).
+     Write a full VAPT ticket for EACH, ordered Critical -> Low, using the TICKET FORMAT in the
+     REPORTING STANDARD below, with evidence screenshots embedded inline
+     (![<caption>](screenshots/<file>), filenames from screenshots/index.json). IMAGES ARE REQUIRED
+     wherever a finding has screenshot evidence. Low-severity findings get a FULL ticket too — do NOT
+     demote them to a table row.
 
-        ### <n>. <Finding Title>
-        - **Status:** Open
-        - **Confidence:** Confirmed | Likely
-        - **Severity (business-informed):** <Critical|High|Medium|Low>
-        - **CVSS Severity:** <band derived from the score>
-        - **CVSS Score:** <number> <Band>
-        - **CVSS Vector:** `CVSS:3.1/...`   (the score MUST match this vector)
-        - **CWE / OWASP:** <root-cause CWE-...> · MASVS-... · MASTG-...
-        - **Affected:** <bundle id / file / URL scheme / keychain item / endpoint + host>
-        - **Severity Justification:** <why this severity; device-local vs network reach; any chaining>
-        - **Description:** <what it is + the EXACT evidence you saw (decoded values, log lines)>
-        - **Impact:** <technical-consequence bullets — the data/types actually exposed>
-        - **Business Impact:** <operational/reputational/financial bullets; note if jailbroken/physical access is required>
-        - **Mitigation:** <concrete, code-level actions + expected hardened behavior — NOT "follow best practices">
-        - **Proof of Concept:** <step-by-step with the real requests/values, and EMBED each supporting
-              screenshot inline -> ![<caption>](screenshots/<file>)  (file + caption from screenshots/index.json)>
-     IMAGES ARE REQUIRED wherever a finding has screenshot evidence.
+  D. NON-ACTIONABLE ITEMS — Informational findings and False Positives ONLY, one concise line each
+     (do NOT drop them, and do NOT write full tickets for them):
+        - <id> <title> — <Verdict> — <one-line reason / short hardening note>
 
-  D. NON-ACTIONABLE ITEMS — list EVERY False Positive and Informational finding (do NOT drop them),
-     ONE concise entry each (a line, not a ticket):
-        - <id> <title> — <Verdict> — <one-line reason it needs no action>
-     For Informational / design-observations, add a short one-line hardening suggestion where useful.
-     Keep this section tight.
-
-  E. AUTOMATED LIVE VERIFICATION & DEEP-DIVE — this is the core of the job, not an afterthought.
-     Do NOT leave findings as "verify manually." Drive the verification yourself, end to end:
-       i.   Ask the operator to connect the jailbroken iPhone over USB and confirm it's reachable
-            (`idevice_id -l`, `frida-ps -U`). If a check needs a particular app state (e.g. logged
-            OUT), ask them to set it, then continue automatically.
-       ii.  For EVERY Likely / needs-validation finding, actually RUN the proof with the on-host
-            tooling. Reuse the framework's bridges from the repo root — this package is at
-            <repo>/output/<bundle>/ai_review, so the repo is `../../..`: `core.ios_device.IOSDevice`
-            (SSH/scp/screencap/containers) and `core.frida_bridge.FridaBridge` (keychain_dump,
-            open_url/open_urls, dump_memory, run_script) — or raw frida / ssh / sqlite3 /
+  E. AUTOMATED LIVE VERIFICATION & DEEP-DIVE — the core of the job, not an afterthought.
+     Do NOT leave findings as "verify manually." Drive it end to end:
+       i.   Ask the operator to connect the jailbroken iPhone over USB and confirm reachability
+            (idevice_id -l, frida-ps -U). If a check needs a particular app state (e.g. logged OUT),
+            ask them to set it, then continue automatically.
+       ii.  For EVERY Likely / needs-validation finding, RUN the proof with on-host tooling. Reuse the
+            framework's bridges from the repo root - this package is at <repo>/output/<bundle>/ai_review,
+            so the repo is ../../..: core.ios_device.IOSDevice and core.frida_bridge.FridaBridge
+            (keychain_dump, open_url/open_urls, dump_memory, run_script) - or raw frida / ssh / sqlite3 /
             idevicesyslog / otool / plutil / base64.
-       iii. DEEP-DIVE — don't stop at the first signal. Decode/parse blobs (sqlite3 + base64/plutil),
-            re-fire URL schemes while LOGGED OUT and screenshot the result, dump & grep process memory,
-            and for keychain DECODE THE ITEM VALUES to prove whether they're real secrets or SDK
-            metadata. Chain it: a leaked token -> where is it used, is it still valid, what does it unlock?
-       iv.  Capture fresh EVIDENCE — save new screenshots into `screenshots/` and command output into
-            `logs/`, and embed/cite them.
-       v.   For each confirmed check, upgrade the finding to CONFIRMED, move it to ACTIONABLE,
-            re-derive CVSS from what you actually proved, and REGENERATE both report files.
-     Goal: turn the noisy automated dump into a thorough, polished report a senior pentester would sign.
+       iii. DEEP-DIVE - decode/parse blobs (sqlite3 + base64/plutil), re-fire URL schemes while LOGGED
+            OUT and screenshot, dump & grep process memory, and DECODE keychain item values to prove
+            whether they are real secrets or SDK metadata. Chain it: a leaked token -> where is it used,
+            is it still valid, what does it unlock?
+       iv.  Capture fresh EVIDENCE into screenshots/ and logs/, then embed/cite it.
+       v.   For each confirmed check, upgrade to CONFIRMED, re-derive CVSS from what you proved, and
+            REGENERATE both report files.
+     Goal: a thorough, polished report a senior pentester would sign.
 
-────────────────────────────────────────────────────────────────────────
-REPORTING STANDARD (authoritative — applies to every ticket; no external skill required):
-  • NEVER fabricate endpoints, payloads, tokens, roles, responses, or steps not in the evidence.
-    Preserve the tester's real values verbatim (full, unredacted — UAT scope above).
-  • CVSS: the numeric Score MUST match the CVSS:3.1 Vector exactly, and the Severity band MUST match
-    the score. A vector with C:N/I:N/A:N scores 0.0 -> Informational.
-        Bands: Critical 9.0–10.0 · High 7.0–8.9 · Medium 4.0–6.9 · Low 0.1–3.9 · Informational 0.0
-  • CVSS calibration for iOS (be realistic about attack prerequisites):
-        AV:L for on-device / physical / jailbroken-only exploitation (most client-side storage,
-        keychain, memory, snapshot findings) — this LOWERS real-world severity; reflect that honestly.
-        AV:N only for genuinely remote reach (ATS cleartext, missing TLS pinning, universal links/API).
-        PR:N no account · PR:L normal user · UI:R if victim action needed · S:C only if exploitation
-        crosses a trust boundary.
-  • CWE = the ROOT weakness, not the symptom (Missing Authorization = CWE-862; Insecure Storage =
-    CWE-922/CWE-312; Cleartext Transmission = CWE-319). Add MASVS/MASTG ids when clearly relevant.
-  • Mitigations must be CONCRETE and code-level (the exact check/config/API + expected hardened
-    behavior) — never "follow best practices".
-  • Claim only what the evidence demonstrates. Secure/accepted behavior, or metadata-only exposure with
-    no real data -> Informational/design-observation (Non-actionable), never an inflated severity.
-  • Voice: "Testing confirmed…", "This indicates…", "No direct security impact identified" for secure
-    behavior. Avoid hype ("attacker can now…", "complete compromise", "critical — immediate action").
-  • Business-Informed Severity MAY differ from the CVSS technical score (e.g. chaining) — when it does,
-    state BOTH and justify in Severity Justification.
-
-If a `vapt-ticket-writer` skill is also installed you may use it, but the standard above is authoritative.
+{_VAPT_STANDARD}
 """
     (pkg / "PROMPT.md").write_text(prompt, encoding="utf-8")
 
@@ -388,7 +436,7 @@ def _write_claude_md(pkg: Path) -> None:
         "re-fire URL schemes LOGGED-OUT + screenshot, grep process memory), save fresh evidence into "
         "`screenshots/` and `logs/`, then upgrade confirmed findings and regenerate a polished "
         "`final_report.md` with the real PoC embedded.\n\n"
-        "Reports split findings into **Actionable** tickets and **Non-actionable** items (both flagged in the triage table); the full VAPT reporting standard is embedded in PROMPT.md — no external skill required.\n",
+        "Reports document EVERY finding rated Low or above as a full VAPT ticket (Informational + false positives are listed one concise line each), using the VAPT reporting standard embedded in PROMPT.md — no external skill required.\n",
         encoding="utf-8",
     )
 

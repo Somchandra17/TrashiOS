@@ -2,6 +2,14 @@
 
 All notable changes to TrashiOS are documented here.
 
+## [0.3.6] — Document every finding ≥ Low + proper VAPT ticket format
+
+### Changed — AI-review report
+- The report now writes a **full VAPT ticket for every finding triaged to real severity Low or above** (Critical/High/Medium/Low), ordered by severity — previously only "Actionable" findings got a write-up, so Medium/Low real issues were collapsed to triage-table rows. Informational findings and false positives stay one concise line each.
+- Adopted a **proper VAPT ticket format** (Title · Status · Confidence · Severity · CVSS Severity · CWE/CVE · CVE · CVSS Score+Band · CVSS Vector · Business-Informed Severity · Severity Justification · Affected · Description · Impact · Business Impact · Mitigation · PoC), matching the team's reporting style.
+- The full reporting standard — bands, iOS CVSS calibration, root-cause CWE selection, report voice, a good/bad mitigation example, a self-validation checklist, and a worked example ticket — is now embedded **statically** in the prompt (`core/ai_review.py`), so quality no longer depends on the prompt being short or on any external skill being installed.
+- Triage table gains a **Real Severity** column alongside Action.
+
 ## [0.3.5] — Actionable/Non-actionable split + embedded VAPT reporting standard
 
 ### Changed — AI-review report structure
