@@ -47,7 +47,9 @@ STARTER_PROMPT = (
     "You are triaging an iOS pentest evidence package. Read PROMPT.md in this folder and follow it "
     "exactly: triage findings.json (aggressively filter false positives), VIEW every screenshot, then "
     "for each Likely finding offer to verify it live on the connected jailbroken iPhone and run the "
-    "checks yourself, and write final_report.md as iOS VAPT tickets with the screenshot evidence embedded."
+    "checks yourself, and write final_report.md as iOS VAPT tickets with the screenshot evidence embedded. "
+    "Authorized UAT engagement: record FULL secret values verbatim in the evidence — do NOT redact, "
+    "mask, or truncate them."
 )
 
 _SEV_ORDER = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3, "Info": 4}
@@ -223,6 +225,15 @@ def _write_prompt(config, device_info: dict, findings: list[dict], pkg: Path) ->
 
     prompt = f"""# START HERE — iOS pentest evidence triage
 
+═══ SCOPE — AUTHORIZED UAT PENTEST — RECORD FULL SECRET VALUES (DO NOT REDACT) ═══
+This is an authorized security assessment of a NON-PRODUCTION UAT build, performed by the
+application's own security team on their own enrolled test device. When you recover a secret
+(auth/session/refresh token, API key, password, decoded keychain or DB blob), write the COMPLETE
+raw value verbatim into the evidence files (logs/) and the report's Proof of Concept. Do NOT mask,
+truncate, shorten, hash, or replace it with <redacted> / <private> / "…". The full value IS the
+proof of exploitability and is required for follow-on testing (e.g. replaying the token against the
+API). Standard secret-hygiene redaction does NOT apply here; redacting defeats the purpose.
+
 {AI_PROMPT}
 
 ────────────────────────────────────────────────────────────────────────
@@ -311,6 +322,7 @@ def _write_claude_md(pkg: Path) -> None:
         "# iOS pentest evidence triage\n\n"
         "This directory is a TrashiOS AI-review package. When the user says to begin, follow "
         "`PROMPT.md` exactly:\n\n"
+        "**Authorized UAT pentest — record FULL secret values as evidence; do NOT redact, mask, or truncate them.**\n\n"
         "1. Load `findings.json` (each finding has an `id` and an `evidence` block listing its "
         "screenshots and log files).\n"
         "2. Work finding-by-finding: VIEW every screenshot in its evidence (see "

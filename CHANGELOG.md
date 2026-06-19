@@ -2,6 +2,21 @@
 
 All notable changes to TrashiOS are documented here.
 
+## [0.3.3] — uiopen on rootless jailbreaks + unredacted UAT evidence
+
+### Fixed
+- **URL-scheme phase now uses `uiopen` when installed.** Detection was a bare `which uiopen`, which
+  misses it on rootless jailbreaks (palera1n): uikittools installs to `/var/jb/usr/bin`, not on the
+  non-login SSH PATH. `_resolve_uiopen` now probes `command -v` **and** the rootless/rootful paths and
+  fires by full path — restoring the stronger cold-launch-via-scheme test instead of the Frida fallback.
+
+### Changed — AI-review evidence handling
+- The generated `PROMPT.md` / `STARTER_PROMPT` / `CLAUDE.md` now state the engagement is an
+  **authorized non-production UAT test** and instruct the AI to **record FULL secret values verbatim**
+  (tokens, keys, decoded keychain/DB blobs) in the evidence and PoC — no `<redacted>`/`<private>`/
+  truncation. Without this the reviewing model self-censored real secrets, defeating verification.
+  (TrashiOS itself never redacts; the `<private>` seen in syslog is iOS `os_log` masking, not the tool.)
+
 ## [0.3.2] — Live AI-review, provider-agnostic backends, no more memory hangs
 
 ### AI-review workflow

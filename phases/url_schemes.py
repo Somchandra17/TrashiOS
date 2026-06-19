@@ -62,9 +62,10 @@ def run_url_scheme_testing(config: Config, device: IOSDevice, frida: FridaBridge
     console.print(f"  [green]URL scheme(s):[/green] {', '.join(schemes)}")
 
     # Choose a fire method: uiopen (uikittools) if present, else Frida openURL.
-    uiopen_ok = _has_uiopen(device)
-    if uiopen_ok:
+    uiopen_path = _resolve_uiopen(device)
+    if uiopen_path:
         method = "uiopen"
+        console.print(f"  [green]uiopen found:[/green] {uiopen_path}  [dim](cold-launch via scheme)[/dim]")
     elif frida.verify_connection():
         method = "frida"
         console.print("  [cyan]uiopen not on device — firing URLs via Frida (UIApplication openURL:).[/cyan]")
@@ -104,10 +105,10 @@ def run_url_scheme_testing(config: Config, device: IOSDevice, frida: FridaBridge
     elif method == "uiopen":
         for url, label, scheme in entries:
             device.force_stop(config.bundle_id)
-            r = device.shell(f"uiopen '{url}'")
+            r = device.shell(f"{uiopen_path} '{url}'")
             ok = r.returncode == 0
             results[url] = ok
-            config.log_command(PHASE, f"uiopen '{url}'", (r.stdout or r.stderr).strip())
+            config.log_command(PHASE, f"{uiopen_path} '{url}'", (r.stdout or r.stderr).strip())
             if ok:
                 _maybe_shot(url, label, scheme)
 
@@ -182,7 +183,15 @@ def _load_plist(path: Path) -> dict | None:
             return None
 
 
-def _has_uiopen(device: IOSDevice) -> bool:
+def _resolve_uiopen(device: IOSDevice) -> str:
+    """Return a runnable path to `uiopen`, or "" if absent. A bare `which uiopen`
+    misses it on rootless jailbreaks (palera1n): uikittools installs to
+    /var/jb/usr/bin, which is NOT on the non-login SSH shell's PATH. Probe both."""
     if not device.caps.ssh:
-        return False
-    return bool(device.shell_output("which uiopen 2>/dev/null"))
+        return ""
+    found = device.shell_output(
+        "command -v uiopen 2>/dev/null || "
+        "for p in /var/jb/usr/bin/uiopen /usr/bin/uiopen /var/jb/usr/local/bin/uiopen; "
+        "do [ -x \"$p\" ] && echo \"$p\" && break; done"
+    ).strip()
+    return found.splitlines()[0].strip() if found else ""
