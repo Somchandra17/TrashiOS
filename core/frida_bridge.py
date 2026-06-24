@@ -203,15 +203,16 @@ rpc.exports = {
             script.load()
             exports = getattr(script, "exports_sync", None) or script.exports
             res = exports.keychain()
-            try:
-                session.detach()
-            except Exception:
-                pass
             if isinstance(res, dict) and res.get("error"):
                 return [], res["error"]
             return (res.get("items", []) if isinstance(res, dict) else []), ""
         except Exception as e:
             return [], f"keychain agent error: {e}"
+        finally:
+            try:
+                session.detach()
+            except Exception:
+                pass
 
     def nsuserdefaults(self) -> RuntimeResult:
         return self._objection_run("ios nsuserdefaults get")

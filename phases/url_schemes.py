@@ -17,6 +17,7 @@ Grounded in OWASP MASTG-TEST-0070/-0071/-0075, MASVS-PLATFORM-1/-3.
 from __future__ import annotations
 
 import plistlib
+import shlex
 import subprocess
 import time
 from pathlib import Path
@@ -105,10 +106,10 @@ def run_url_scheme_testing(config: Config, device: IOSDevice, frida: FridaBridge
     elif method == "uiopen":
         for url, label, scheme in entries:
             device.force_stop(config.bundle_id)
-            r = device.shell(f"{uiopen_path} '{url}'")
+            r = device.shell(f"{shlex.quote(uiopen_path)} {shlex.quote(url)}")
             ok = r.returncode == 0
             results[url] = ok
-            config.log_command(PHASE, f"{uiopen_path} '{url}'", (r.stdout or r.stderr).strip())
+            config.log_command(PHASE, f"{uiopen_path} {url}", (r.stdout or r.stderr).strip())
             if ok:
                 _maybe_shot(url, label, scheme)
 

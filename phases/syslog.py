@@ -84,6 +84,8 @@ def run_syslog_monitoring(config: Config, device: IOSDevice) -> None:
         except Exception:
             pass
     t.join(timeout=3)
+    if t.is_alive():
+        console.print("  [yellow]Warning: syslog reader thread did not stop cleanly (pipe still open).[/yellow]")
 
     if not lines:
         console.print("  [yellow]No log lines captured.[/yellow]")

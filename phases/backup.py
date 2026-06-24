@@ -113,6 +113,8 @@ def _app_domain_files(manifest: Path, bundle_id: str, root: Path):
             disk = root / file_id[:2] / file_id
             out.append((rel or file_id, str(disk)))
         con.close()
-    except Exception:
-        pass
+    except Exception as e:
+        config.log_command(PHASE, "Manifest.db parse", f"FAILED: {e}")
+        config.add_finding(PHASE, "Backup Manifest.db parse error", "Low",
+                           f"Could not read backup file list from Manifest.db: {e}")
     return out

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 import plistlib
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -333,7 +334,7 @@ class IOSDevice:
             dev.resume(pid)
             return f"spawned pid={pid}"
         except Exception:
-            r = self.shell(f"uiopen --bundleid {bundle_id} 2>/dev/null || open {bundle_id}")
+            r = self.shell(f"uiopen --bundleid {shlex.quote(bundle_id)} 2>/dev/null || open {shlex.quote(bundle_id)}")
             return (r.stdout or r.stderr).strip() or "launch attempted via ssh"
 
     def force_stop(self, bundle_id: str) -> None:
@@ -506,7 +507,7 @@ class IOSDevice:
 
         if not data:
             meta = self.shell_output(
-                f"grep -rl '{bundle_id}' "
+                f"grep -rl {shlex.quote(bundle_id)} "
                 f"/var/mobile/Containers/Data/Application/*/.com.apple.mobile_container_manager.metadata.plist "
                 f"2>/dev/null | head -1"
             )
@@ -515,7 +516,7 @@ class IOSDevice:
 
         if not bundle:
             info = self.shell_output(
-                f"grep -rl '{bundle_id}' "
+                f"grep -rl {shlex.quote(bundle_id)} "
                 f"/var/containers/Bundle/Application/*/*.app/Info.plist 2>/dev/null | head -1"
             )
             if info:

@@ -53,7 +53,7 @@ def run_pasteboard_analysis(config: Config, device: IOSDevice, frida: FridaBridg
     res = frida.pasteboard_monitor(seconds=_MONITOR_SECONDS)
     config.log_command(PHASE, "frida: monitor UIPasteboard.generalPasteboard", res.stdout or res.stderr)
 
-    if not res.success or not res.stdout.strip():
+    if not res.success or not (res.stdout or "").strip():
         console.print("  [green]No changes captured on the general pasteboard.[/green]")
         config.add_finding(PHASE, "No general-pasteboard writes observed", "Info",
                            "No sensitive data was seen on the general pasteboard during the monitoring window. "
