@@ -49,6 +49,7 @@ class Capabilities:
     root: bool = False    # ssh login is uid=0 (jailbroken)
 
     def summary(self) -> str:
+        """One-line transport-ladder summary for logging, e.g. "libimobiledevice=ok, ssh=ok, frida=no, root=yes"."""
         parts = [
             f"libimobiledevice={'ok' if self.afc else 'no'}",
             f"ssh={'ok' if self.ssh else 'no'}",
@@ -193,9 +194,11 @@ class IOSDevice:
             return subprocess.CompletedProcess(argv, 124, "", f"ssh timed out after {timeout}s")
 
     def shell_output(self, cmd: str, root: bool = True, timeout: int = 60) -> str:
+        """Run a command over SSH and return only its stripped stdout."""
         return self.shell(cmd, root=root, timeout=timeout).stdout.strip()
 
     def list_dir(self, path: str, root: bool = True) -> list[str]:
+        """`ls -la` the device *path* over SSH, returned as a list of output lines."""
         out = self.shell_output(f"ls -la '{path}'", root=root)
         return out.splitlines()
 
@@ -272,9 +275,11 @@ class IOSDevice:
         return apps
 
     def is_package_installed(self, bundle_id: str) -> bool:
+        """True if *bundle_id* is present in the device's installed-app list."""
         return bundle_id in self.get_installed_apps()
 
     def install_app(self, ipa_path: str) -> str:
+        """Install an .ipa via ideviceinstaller (handles the 1.2.0 `install` vs 1.1.x `-i` split); returns installer stdout, raises IOSError if the file is missing or every variant fails."""
         if not Path(ipa_path).exists():
             raise IOSError(f"IPA file not found: {ipa_path}")
         # ideviceinstaller 1.2.0 uses `install <ipa>`; 1.1.x uses `-i <ipa>`.
@@ -334,6 +339,7 @@ class IOSDevice:
             return (r.stdout or r.stderr).strip() or "launch attempted via ssh"
 
     def force_stop(self, bundle_id: str) -> None:
+        """Kill the running app by pid (frida-ps), falling back to killall on the resolved executable name."""
         pid = self.get_pid(bundle_id)
         if pid:
             self.shell(f"kill -9 {pid}")
@@ -366,6 +372,7 @@ class IOSDevice:
             return f"scp timed out pulling {remote}"
 
     def pull_as_root(self, remote: str, local: str) -> str:
+        """Pull *remote* to *local* over root SSH — alias of pull() (palera1n's SSH login is already uid=0)."""
         # SSH login is already root under palera1n; identical to pull.
         return self.pull(remote, local)
 
@@ -526,12 +533,14 @@ class IOSDevice:
         return self._data_container, self._bundle_container, self._executable_name
 
     def get_data_container(self, bundle_id: str) -> Optional[str]:
+        """Resolved (and cached) Data-container path /var/mobile/Containers/Data/Application/<UUID>, or None."""
         if self._data_container:
             return self._data_container
         self.resolve_containers(bundle_id)
         return self._data_container
 
     def get_bundle_container(self, bundle_id: str) -> Optional[str]:
+        """Resolved (and cached) Bundle-container path /var/containers/Bundle/Application/<UUID>/<App>.app, or None."""
         if self._bundle_container:
             return self._bundle_container
         self.resolve_containers(bundle_id)

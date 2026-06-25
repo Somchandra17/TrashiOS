@@ -36,6 +36,7 @@ _EXC_RE = re.compile(r"(NSException|EXC_BAD_ACCESS|Fatal error|\*\*\* Terminatin
 
 
 def run_syslog_monitoring(config: Config, device: IOSDevice) -> None:
+    """Capture device logs via idevicesyslog while the app is exercised, then scan for leaked secrets/PII, cleartext HTTP, logged SQL, and crash traces; evidence in syslog/syslog_capture.txt."""
     console.print(f"\n[bold cyan]═══ {PHASE} ═══[/bold cyan]\n")
 
     process = config.executable_name or ""

@@ -31,6 +31,7 @@ _JB_HOOKS = ("jailbreak", "/applications/cydia", "fork", "stat", "fopen", "canop
 
 
 def run_runtime_hardening(config: Config, device: IOSDevice, frida: FridaBridge) -> None:
+    """Probe the app's defensive controls (TLS pinning, jailbreak detection, anti-debugging) by attempting objection bypasses; whether a control is hookable indicates its presence. Findings need MitM validation."""
     console.print(f"\n[bold cyan]═══ {PHASE} ═══[/bold cyan]\n")
 
     if not frida.verify_connection():

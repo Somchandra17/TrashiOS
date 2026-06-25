@@ -98,6 +98,7 @@ class FridaBridge:
     # ── connection (mirror Drozer.setup_port_forward + verify_connection) ──
 
     def verify_connection(self) -> bool:
+        """Return True if frida-server is reachable over USB (a quick `frida-ps -U` exits 0)."""
         try:
             r = subprocess.run(["frida-ps", "-U"], capture_output=True, text=True, timeout=TIMING.frida_ps_timeout)
             return r.returncode == 0
@@ -219,21 +220,27 @@ rpc.exports = {
                 pass
 
     def nsuserdefaults(self) -> RuntimeResult:
+        """Dump the app's NSUserDefaults (the iOS shared-prefs equivalent) via objection."""
         return self._objection_run("ios nsuserdefaults get")
 
     def plist_cat(self, path: str) -> RuntimeResult:
+        """Read an on-device plist at *path* via objection (`ios plist cat`)."""
         return self._objection_run(f"ios plist cat '{path}'")
 
     def sqlite_connect(self, path: str) -> RuntimeResult:
+        """Open the on-device SQLite DB at *path* via objection; allowed the longer db_query_timeout."""
         return self._objection_run(f"ios sqlite connect '{path}'", timeout=TIMING.db_query_timeout)
 
     def cookies(self) -> RuntimeResult:
+        """Dump the app's HTTP cookie store (Cookies.binarycookies) via objection."""
         return self._objection_run("ios cookies get")
 
     def info_binary(self) -> RuntimeResult:
+        """Report the app binary's protections (PIE/ARC/stack-canary/encryption) via objection `ios info binary`."""
         return self._objection_run("ios info binary")
 
     def list_frameworks(self) -> RuntimeResult:
+        """List the frameworks/dylibs loaded by the app bundle via objection."""
         return self._objection_run("ios bundles list_frameworks")
 
     def env(self) -> dict:
@@ -248,9 +255,11 @@ rpc.exports = {
         return out
 
     def disable_sslpinning(self) -> RuntimeResult:
+        """Attempt objection's TLS pinning bypass; the hooked-API output doubles as a presence probe for whether the app pins."""
         return self._objection_run("ios sslpinning disable", timeout=TIMING.objection_command_timeout)
 
     def disable_jailbreak_detect(self) -> RuntimeResult:
+        """Attempt objection's jailbreak-detection bypass; the hooked-routine output reveals whether the app does JB detection."""
         return self._objection_run("ios jailbreak disable", timeout=TIMING.objection_command_timeout)
 
     # ── raw Frida (spawn / custom agents — memory dump, hooks) ───
@@ -337,6 +346,7 @@ rpc.exports = {
         return results
 
     def spawn(self) -> Optional[int]:
+        """Spawn the target bundle via Frida and resume it, returning the new pid (or None on failure)."""
         try:
             import frida
             dev = frida.get_usb_device(timeout=TIMING.frida_device_timeout)

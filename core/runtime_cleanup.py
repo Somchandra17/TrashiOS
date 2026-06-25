@@ -28,15 +28,19 @@ class RuntimeCleanupManager:
         self._final_report_generated = False
 
     def set_device(self, device) -> None:
+        """Register the IOSDevice whose transports (the iproxy tunnel) cleanup() should tear down."""
         self.device = device
 
     def set_background_collector(self, collector) -> None:
+        """Register the background syslog collector for cleanup() to stop."""
         self.bg_syslog = collector
 
     def mark_final_report_generated(self) -> None:
+        """Mark that the full report already shipped, so cleanup() skips the partial-report fallback."""
         self._final_report_generated = True
 
     def cleanup(self, generate_partial_report: bool = True) -> None:
+        """Idempotently stop the syslog collector, screenshot mirror, and device transports; unless suppressed, write a partial report when findings exist but no final one was generated (e.g. on Ctrl-C)."""
         if self._cleaned:
             return
         self._cleaned = True

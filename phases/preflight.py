@@ -21,10 +21,12 @@ console = Console()
 
 
 def check_tool(name: str) -> bool:
+    """Return True if the named host tool is on PATH (shutil.which presence check)."""
     return shutil.which(name) is not None
 
 
 def check_tool_version(name: str) -> str:
+    """Best-effort version string for a host tool: try --version/-V/-v/version and return the first output line that looks like a real version, skipping usage/error/warning lines; falls back to "installed"."""
     # Skip lines that are actually errors/usage/warnings so the table shows a real
     # version or a clean "installed" — never an "illegal option" / traceback line.
     bad = ("illegal option", "unrecognized option", "unknown option", "unknown command",

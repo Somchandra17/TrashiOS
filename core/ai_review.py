@@ -71,6 +71,7 @@ _LOG_SOURCES = {
 
 
 def assemble_review_package(config, device_info: dict, report_path) -> Path:
+    """Build the self-contained ai_review/ package: copy screenshots + logs, derive findings, and write findings.json, the screenshot index, the report copy, the triage prompt, CLAUDE.md, run_review.sh and gen_html.py; returns the (freshly recreated) package dir."""
     pkg = config.output_dir / "ai_review"
     if pkg.exists():
         shutil.rmtree(pkg)

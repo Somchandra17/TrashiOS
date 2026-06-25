@@ -50,6 +50,7 @@ _SCREENSHOT_LABELS = {"base scheme", "privileged screen"}
 
 def run_url_scheme_testing(config: Config, device: IOSDevice, frida: FridaBridge,
                            screenshotter: ScreenshotManager) -> None:
+    """Enumerate declared CFBundleURLTypes and fire each scheme with benign, privileged-action, and injection payloads (uiopen or Frida openURL), screenshotting results; recorded as attack surface needing manual validation."""
     console.print(f"\n[bold cyan]═══ {PHASE} ═══[/bold cyan]\n")
 
     schemes = _enumerate_schemes(config, device)

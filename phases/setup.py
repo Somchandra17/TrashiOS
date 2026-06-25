@@ -29,6 +29,7 @@ def _validate_bundle_id(bid: str) -> bool:
 
 
 def select_device() -> str:
+    """Return the UDID of the iOS device to test: auto-selected when one is connected, otherwise prompted from the usbmuxd device list. Returns "" if none are connected."""
     devices = IOSDevice.get_devices()
     if not devices:
         console.print("[red]No connected iOS devices found via usbmuxd.[/red]")

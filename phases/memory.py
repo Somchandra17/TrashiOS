@@ -28,6 +28,7 @@ PHASE = "Phase IX — Process Memory Analysis"
 
 
 def run_memory_analysis(config: Config, device: IOSDevice, frida: FridaBridge) -> None:
+    """Dump the running app's read/write memory via Frida and scan it for secrets lingering in RAM after login; also records open file descriptors and network connections over SSH."""
     console.print(f"\n[bold cyan]═══ {PHASE} ═══[/bold cyan]\n")
 
     if not frida.verify_connection():

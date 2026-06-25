@@ -27,6 +27,7 @@ _MONITOR_SECONDS = 20
 
 
 def run_pasteboard_analysis(config: Config, device: IOSDevice, frida: FridaBridge) -> None:
+    """Monitor the general (system) UIPasteboard via Frida while sensitive values are copied, then scan the captured contents for secrets that leak to any other app."""
     console.print(f"\n[bold cyan]═══ {PHASE} ═══[/bold cyan]\n")
 
     if not frida.verify_connection():

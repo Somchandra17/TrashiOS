@@ -33,6 +33,7 @@ PHASE = "Phase II — Static Binary & Info.plist Analysis"
 
 
 def run_static_binary_analysis(config: Config, device: IOSDevice) -> None:
+    """Obtain the .app bundle (SSH pull or IPA unzip) and inspect Info.plist (ATS, URL types), entitlements, Mach-O hardening (PIE/canary/ARC/cryptid), and embedded secrets."""
     console.print(f"\n[bold cyan]═══ {PHASE} ═══[/bold cyan]\n")
 
     app_dir = _obtain_app_bundle(config, device)
