@@ -180,7 +180,7 @@ output/<bundle_id>/
 
 ## AI Triage (false-positive filtering)
 
-Automated tools over-report. Instead of converting the report to PDF (which strips the screenshots and raw logs an AI needs), every run drops a **self-contained `ai_review/` folder** an AI works on directly — it reads `findings.json` + `report.md` + the raw `logs/`, **views every screenshot as an image**, and writes a triaged `final_report.md` **plus a self-contained `final_report.html`** — built deterministically by the bundled `gen_html.py` (every screenshot embedded, copy buttons, a filterable triage table; the AI spends ~0 tokens on design) — as **iOS VAPT tickets**, aggressively filtering false positives (regex keyword hits, third-party-SDK artifacts, jailbreak-only items, OAuth redirect schemes, etc.).
+Automated tools over-report. Instead of converting the report to PDF (which strips the screenshots and raw logs an AI needs), every run drops a **self-contained `ai_review/` folder** an AI works on directly — it reads `findings.json` + `report.md` + the raw `logs/`, **views every screenshot as an image**, and writes a triaged `final_report.md` **plus a self-contained `final_report.html`** — built deterministically by the bundled [`gen_html.py`](docs/HTML_REPORT.md) (every screenshot embedded, copy buttons, a filterable triage table; the AI spends ~0 tokens on design) — as **iOS VAPT tickets**, aggressively filtering false positives (regex keyword hits, third-party-SDK artifacts, jailbreak-only items, OAuth redirect schemes, etc.).
 
 At the end of an interactive run you choose how to triage:
 
