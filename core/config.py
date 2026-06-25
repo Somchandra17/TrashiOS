@@ -17,6 +17,7 @@ _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
 def scrub(text) -> str:
+    """Strip NUL/non-printable control bytes (keeping tab/newline/CR) so binary device output can't corrupt the report; coerces non-str input to str."""
     if not isinstance(text, str):
         text = str(text)
     return _CONTROL_RE.sub("", text)
@@ -235,6 +236,7 @@ class Config:
     screenshots: list = field(default_factory=list)
 
     def init_output(self) -> None:
+        """Create the output/<bundle_id>/ evidence tree (screenshots, data_container, bundle, keychain, syslog, memory, ...) and point output_dir/screenshot_dir at it."""
         self.output_dir = Path("output") / self.bundle_id
         self.screenshot_dir = self.output_dir / "screenshots"
         for d in [
@@ -259,6 +261,7 @@ class Config:
     _VALID_SEVERITIES = {"Critical", "High", "Medium", "Low", "Info"}
 
     def add_finding(self, phase: str, title: str, severity: str, detail: str, status: str = "Open") -> None:
+        """Record a finding under *phase*; severity is normalized to Critical/High/Medium/Low/Info (invalid warns -> Info) and title/detail are scrubbed of control bytes."""
         severity = severity.strip().title()
         if severity not in self._VALID_SEVERITIES:
             import warnings
@@ -272,9 +275,11 @@ class Config:
         )
 
     def log_command(self, phase: str, cmd: str, stdout: str, stderr: str = "", rc: int = 0) -> None:
+        """Append a command's cmd/stdout/stderr/return-code to the evidence log (all fields scrubbed of control bytes)."""
         self.commands_log.append(
             {"phase": phase, "cmd": scrub(cmd), "stdout": scrub(stdout), "stderr": scrub(stderr), "rc": rc}
         )
 
     def add_screenshot(self, path: str, caption: str, phase: str) -> None:
+        """Record a captured screenshot (report-relative path, caption, owning phase) for embedding in the report."""
         self.screenshots.append({"path": path, "caption": caption, "phase": phase})

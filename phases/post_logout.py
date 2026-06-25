@@ -34,6 +34,7 @@ _PRIV_DEEPLINKS = ["dashboard", "account", "profile", "settings", "wallet", "hom
 
 def run_post_logout_testing(config: Config, device: IOSDevice, frida: FridaBridge,
                             screenshotter: ScreenshotManager) -> None:
+    """After logout, verify session tokens are cleared (keychain + preference plists) and that privileged deeplinks no longer reach authenticated screens; evidence is residual-token dumps and replayed-deeplink screenshots."""
     console.print(f"\n[bold cyan]═══ {PHASE} ═══[/bold cyan]\n")
 
     _perform_logout(config, device)

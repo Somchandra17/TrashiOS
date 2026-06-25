@@ -402,6 +402,7 @@ class ReportGenerator:
         return float(match.group(1)) if match else None
 
     def generate(self) -> str:
+        """Compile deduped findings into the Markdown report (exec summary, phase coverage, PII + per-finding write-ups with contextual CVSS/remediation/Jira drafts, commands log, risk table), write it plus a sibling findings_*.json sharing one timestamp, and return the report path."""
         c = self.config
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         report_name = f"iOS_DAST_Report_{c.bundle_id}_{c.timestamp}.md"

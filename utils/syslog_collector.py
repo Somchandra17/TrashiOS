@@ -32,6 +32,7 @@ class BackgroundSyslogCollector:
         self._lines: list[str] = []
 
     def start(self) -> None:
+        """Start the background idevicesyslog capture thread (idempotent — no-op if already running)."""
         if self._thread and self._thread.is_alive():
             return
         self._stop_event.clear()
@@ -39,6 +40,7 @@ class BackgroundSyslogCollector:
         self._thread.start()
 
     def stop(self) -> None:
+        """Stop the capture thread and terminate idevicesyslog, force-killing and re-joining if it doesn't exit promptly."""
         self._stop_event.set()
         self._terminate_process(force_kill=True)
         thread = self._thread
@@ -102,6 +104,7 @@ class BackgroundSyslogCollector:
             self._terminate_process(force_kill=True)
 
     def save_and_scan(self) -> list[dict]:
+        """Write the captured log to background_syslog.txt and scan it for sensitive data — Presidio entity findings if the engine loads, else a regex fallback; returns a list of finding dicts."""
         if not self._lines:
             return []
 

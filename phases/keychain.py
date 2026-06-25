@@ -44,6 +44,7 @@ def _label(code) -> str:
 
 
 def run_keychain_analysis(config: Config, device: IOSDevice, frida: FridaBridge) -> None:
+    """Dump keychain items via Frida (SecItemCopyMatching), assess each item's kSecAttrAccessible data-protection class, and scan values for secrets; evidence in keychain/keychain_items.json."""
     console.print(f"\n[bold cyan]═══ {PHASE} ═══[/bold cyan]\n")
 
     if not frida.verify_connection():

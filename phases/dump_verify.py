@@ -30,6 +30,7 @@ _INTERESTING_KEYS = ("token", "password", "secret", "session", "auth", "key", "c
 
 
 def run_dump_verification(config: Config, device: IOSDevice) -> None:
+    """Deep per-store analysis of the pulled Data container — per-table SQLite sampling, plist key/value extraction, and SQLCipher/Realm opaque-DB detection — surfacing sensitive content."""
     console.print(f"\n[bold cyan]═══ {PHASE} ═══[/bold cyan]\n")
 
     base = config.output_dir / "data_container"

@@ -25,6 +25,7 @@ _IMG_EXTS = (".ktx", ".jpeg", ".jpg", ".png")
 
 
 def run_snapshot_analysis(config: Config, device: IOSDevice, screenshotter: ScreenshotManager) -> None:
+    """Pull Library/Caches/Snapshots and report app-switcher snapshots that may have captured a sensitive screen when the app was backgrounded; renderable images are embedded as evidence."""
     console.print(f"\n[bold cyan]═══ {PHASE} ═══[/bold cyan]\n")
 
     data_remote = config.data_container or device.get_data_container(config.bundle_id)

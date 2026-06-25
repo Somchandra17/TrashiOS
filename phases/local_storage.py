@@ -28,6 +28,7 @@ _INTERESTING = ("cache.db", "cookies.binarycookies")
 
 
 def run_local_storage_analysis(config: Config, device: IOSDevice) -> None:
+    """Pull the app's Data container and scan every store for secrets/PII, flagging notable stores (NSUserDefaults plists, SQLite/Realm DBs, cookies, backgrounding snapshots)."""
     console.print(f"\n[bold cyan]═══ {PHASE} ═══[/bold cyan]\n")
 
     data_remote = config.data_container or device.get_data_container(config.bundle_id)

@@ -71,6 +71,7 @@ class ScreenshotManager:
         )
 
     def stop_mirror(self) -> None:
+        """No-op teardown: the QuickTime live-view window is user-managed, so we must not kill it (kept for cleanup-manager API parity)."""
         # QuickTime is user-managed; nothing to tear down (don't kill their window).
         return
 

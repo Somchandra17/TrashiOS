@@ -34,6 +34,7 @@ PHASE = "Phase I — App Binary Decryption"
 
 
 def run_decryption(config: Config, device: IOSDevice, frida: FridaBridge) -> None:
+    """Strip FairPlay DRM with frida-ios-dump to produce a decrypted .ipa, then re-scan the binary for secrets that encryption had hidden; consent-gated via --decrypt, sets config.decrypted_bundle."""
     console.print(f"\n[bold cyan]═══ {PHASE} ═══[/bold cyan]\n")
 
     # ── Consent gate (DRM) ──

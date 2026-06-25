@@ -30,6 +30,7 @@ _MAX_SCAN_FILES = 300
 
 
 def run_backup_analysis(config: Config, device: IOSDevice) -> None:
+    """Create an unencrypted device backup and report app-domain files recoverable offline that aren't NSURLIsExcludedFromBackupKey-excluded, scanning them for secrets; consent-gated via --backup."""
     console.print(f"\n[bold cyan]═══ {PHASE} ═══[/bold cyan]\n")
 
     if not config.allow_backup:
