@@ -112,7 +112,7 @@ The framework starts the SSH-over-USB tunnel itself (`iproxy <local-port> <ssh-p
 | `--track all\|static\|dynamic` | Run all phases, only SAST, or only DAST (default `all`) |
 | `--decrypt` | Authorize FairPlay binary decryption in Phase I (off by default; authorized testing only) |
 | `--backup` | Run the slow full device backup in Phase XII (off by default) |
-| `--ai-review` | After the run, run the AI review **headless** (streams live activity) over `ai_review/` → `final_report.md`; honors `$TRASHIOS_REVIEW_CMD` |
+| `--ai-review` | After the run, run the AI review **headless** (streams live activity) over `ai_review/` → `final_report.md` (+ auto-built `final_report.html`); honors `$TRASHIOS_REVIEW_CMD` |
 | `--mirror` | Open the QuickTime live view without the y/n prompt (blurs anti-capture apps) |
 | `--ssh-port N` | Device SSH port (palera1n=`44`, checkra1n=`22`; default `44`) |
 | `--ssh-pass PW` | Device root SSH password (default `alpine`) |
@@ -156,12 +156,13 @@ Use `--track static` or `--track dynamic` to run only the SAST or DAST phases, o
 
 ```
 output/<bundle_id>/
-├── ai_review/                         # ★ self-contained folder to run `claude` on → final_report.md
+├── ai_review/                         # ★ self-contained folder to run `claude` on → final_report.md + .html
 │   ├── PROMPT.md · CLAUDE.md          #   triage instructions (false-positive-first, VAPT tickets)
 │   ├── findings.json · report.md      #   findings + human report
 │   ├── screenshots/ (+ index.json)    #   PNG evidence (Claude VIEWS these — no PDF stripping)
 │   ├── logs/                          #   full command log, syslog, keychain dump, grep hits
-│   └── run_review.sh                  #   one command → Claude writes final_report.md
+│   ├── run_review.sh                  #   one command → final_report.md (then auto-runs gen_html.py)
+│   └── gen_html.py                    #   final_report.md → self-contained final_report.html (fixed B&W theme)
 ├── iOS_DAST_Report_<bundle>_<ts>.md   # human report
 ├── findings_<bundle>_<ts>.json        # machine-readable findings
 ├── screenshots/                       # device screenshots (Frida-rendered; idevicescreenshot when a DDI is mountable)
@@ -179,7 +180,7 @@ output/<bundle_id>/
 
 ## AI Triage (false-positive filtering)
 
-Automated tools over-report. Instead of converting the report to PDF (which strips the screenshots and raw logs an AI needs), every run drops a **self-contained `ai_review/` folder** an AI works on directly — it reads `findings.json` + `report.md` + the raw `logs/`, **views every screenshot as an image**, and writes a triaged `final_report.md` **plus a self-contained `final_report.html`** (evidence embedded inline) as **iOS VAPT tickets**, aggressively filtering false positives (regex keyword hits, third-party-SDK artifacts, jailbreak-only items, OAuth redirect schemes, etc.).
+Automated tools over-report. Instead of converting the report to PDF (which strips the screenshots and raw logs an AI needs), every run drops a **self-contained `ai_review/` folder** an AI works on directly — it reads `findings.json` + `report.md` + the raw `logs/`, **views every screenshot as an image**, and writes a triaged `final_report.md` **plus a self-contained `final_report.html`** — built deterministically by the bundled `gen_html.py` (every screenshot embedded, copy buttons, a filterable triage table; the AI spends ~0 tokens on design) — as **iOS VAPT tickets**, aggressively filtering false positives (regex keyword hits, third-party-SDK artifacts, jailbreak-only items, OAuth redirect schemes, etc.).
 
 At the end of an interactive run you choose how to triage:
 
@@ -200,7 +201,7 @@ python main.py --bundle com.example.app --ai-review
 
 # or run it yourself, any time:
 cd output/com.example.app/ai_review && claude            # interactive — verifies on-device, can ask you questions
-cd output/com.example.app/ai_review && ./run_review.sh   # headless → final_report.md (honors $TRASHIOS_REVIEW_CMD)
+cd output/com.example.app/ai_review && ./run_review.sh   # headless → final_report.md + .html (honors $TRASHIOS_REVIEW_CMD)
 ```
 
 > **Agentic vs. plain chat:** viewing screenshots and running live on-device verification needs a tool with filesystem/image access (Claude Code, aider). A plain cloud chat can still triage the text from `report.md` + `findings.json`, just without image viewing or a live PoC.

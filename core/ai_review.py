@@ -31,6 +31,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -42,12 +43,14 @@ from core.report import AI_PROMPT, _dedupe_findings
 
 console = Console()
 
+_TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
+
 # Copy-pasteable starter prompt the operator can give Claude (or any AI) to begin the triage.
 STARTER_PROMPT = (
     "You are triaging an iOS pentest evidence package. Read PROMPT.md in this folder and follow it "
     "exactly: triage findings.json (aggressively filter false positives), VIEW every screenshot, then "
     "for each Likely finding offer to verify it live on the connected jailbroken iPhone and run the "
-    "checks yourself, and write final_report.md as iOS VAPT tickets with the screenshot evidence embedded, plus a self-contained final_report.html (same content, evidence images embedded inline, nothing redacted). "
+    "checks yourself, and write final_report.md as iOS VAPT tickets with the screenshot evidence embedded. As your FINAL step, run `python3 gen_html.py` in this folder to build final_report.html — do NOT hand-write HTML or design CSS; the generator and its theme are fixed. "
     "Authorized UAT engagement: record FULL secret values verbatim in the evidence — do NOT redact, "
     "mask, or truncate them."
 )
@@ -84,6 +87,7 @@ def assemble_review_package(config, device_info: dict, report_path) -> Path:
     _write_prompt(config, device_info, findings, pkg)
     _write_claude_md(pkg)
     _write_runner(pkg)
+    _write_gen_html(pkg)
     return pkg
 
 
@@ -357,18 +361,16 @@ HOW TO WORK (finding-by-finding):
   4. Cite the finding `id` and the exact screenshot filename / log line in your justification.
   5. WRITE your output to `final_report.md` in THIS directory.
 
-FINAL REPORT — produce BOTH files, identical content, NOTHING redacted:
-  • `final_report.md`   — Markdown (sections A–D below); embed evidence with ![](screenshots/<file>).
-  • `final_report.html` — a SELF-CONTAINED HTML version of the SAME report: embed EVERY evidence image
-    inline as a base64 data URI (<img src="data:image/png;base64,...">) so it renders standalone when
-    shared or opened anywhere (do NOT depend on the screenshots/ folder being present). Keep the HTML design SIMPLE, functional and neat — do NOT build an elaborate or high-end UI, and
-    do not spend extra effort or tokens on styling. A small inline <style> is enough: a system font
-    stack, readable headings, generous spacing, a severity-colored triage table, light borders,
-    monospace blocks for PoC/log snippets, and images capped to a sensible max-width. Prioritize the
-    content and evidence over visual flourish — clean and skimmable, not over-designed. You may downscale very large screenshots to keep the file
-    reasonable, but NEVER omit or redact evidence — include full secret values verbatim (UAT scope above).
+FINAL REPORT — write `final_report.md`, then GENERATE the HTML from it; NOTHING redacted:
+  • `final_report.md`   — Markdown (sections A–E below); embed evidence with ![](screenshots/<file>).
+  • `final_report.html` — do NOT hand-write this and do NOT design any CSS or spend tokens on styling.
+    After final_report.md is complete, run `python3 gen_html.py` in this folder: it deterministically
+    converts final_report.md + screenshots/ into ONE self-contained HTML (every screenshot embedded as
+    a base64 data URI, a Copy button on every code/secret block, a sticky section nav, auto-filled stat
+    cards, and a filterable triage table), then self-validates and prints PASS/FAIL. The theme is fixed
+    and proven. This must be your FINAL step, after the report is done.
 
-Content of BOTH files (identical content; NOTHING redacted):
+Content of the report (final_report.md — the HTML is generated from it; NOTHING redacted):
   A. EXECUTIVE SUMMARY (3-5 sentences): real risk posture with noise excluded — counts by real
      severity, how many findings are Actionable vs Non-actionable, and the top real issue(s).
 
@@ -428,7 +430,7 @@ def _write_claude_md(pkg: Path) -> None:
         "4. Write `final_report.md` using the operator's finding-field format (Severity / Status / "
         "Confidence / CVSS (estimated) / CVSS Vector (estimated) / Business Impact / Description / "
         "Proof of Concept / Remediation), and EMBED supporting screenshots inline with "
-        "`![caption](screenshots/<file>)`. ALSO write `final_report.html` — the same report as a self-contained HTML file with every evidence image embedded inline (base64 data URI), NOTHING redacted, and a SIMPLE, functional design (minimal CSS, no high-end styling).\n"
+        "`![caption](screenshots/<file>)`. Then build `final_report.html` by running `python3 gen_html.py` in this folder — do NOT hand-write HTML or design CSS; it deterministically converts final_report.md + screenshots/ into one self-contained, self-validating HTML with the fixed theme. Run it as your final step.\n"
         "5. DRIVE automated live verification (the core of the job): ask the operator to connect the "
         "jailbroken iPhone, then for EVERY Likely / needs-validation finding run the proof yourself — "
         "reuse the TrashiOS bridges at the repo root `../../..` (IOSDevice, FridaBridge) or raw "
@@ -439,6 +441,21 @@ def _write_claude_md(pkg: Path) -> None:
         "Reports document EVERY finding rated Low or above as a full VAPT ticket (Informational + false positives are listed one concise line each), using the VAPT reporting standard embedded in PROMPT.md — no external skill required.\n",
         encoding="utf-8",
     )
+
+
+def _write_gen_html(pkg: Path) -> None:
+    """Copy the deterministic HTML generator into the package.
+
+    The AI just runs `python3 gen_html.py` to turn final_report.md + screenshots/ into a
+    self-contained final_report.html — fixed theme, ~0 tokens on design, built-in self-check.
+    Source of truth: core/templates/gen_html.py.
+    """
+    dst = pkg / "gen_html.py"
+    shutil.copy2(_TEMPLATE_DIR / "gen_html.py", dst)
+    try:
+        os.chmod(dst, 0o755)
+    except OSError:
+        pass
 
 
 def _write_runner(pkg: Path) -> None:
@@ -461,8 +478,11 @@ def _write_runner(pkg: Path) -> None:
         '  echo "Running Claude over the review package (reads logs + views all screenshots; a few minutes)..."\n'
         '  claude -p "$(cat PROMPT.md)" --permission-mode acceptEdits --output-format text\n'
         'fi\n'
+        'if [ -f final_report.md ]; then\n'
+        '  python3 gen_html.py || echo "gen_html.py exited non-zero — see its summary above."\n'
+        'fi\n'
         'echo\n'
-        'echo "Done. Final report: $(pwd)/final_report.md"\n',
+        'echo "Done. Reports: $(pwd)/final_report.md + final_report.html"\n',
         encoding="utf-8",
     )
     try:
@@ -517,9 +537,34 @@ def _announce_final(pkg: Path, console: Console) -> None:
     final = pkg / "final_report.md"
     if final.exists():
         console.print(f"[green]✓ Final triaged report: {final}[/green]")
+        _generate_html(pkg, console)
     else:
         console.print(f"[yellow]Finished, but final_report.md was not written — check the output above. "
                       f"Package: {pkg}[/yellow]")
+
+
+def _generate_html(pkg: Path, console: Console) -> None:
+    """Deterministically build final_report.html from final_report.md via the bundled
+    gen_html.py — no AI tokens on HTML. It self-validates and prints PASS/FAIL; a non-zero
+    exit (e.g. a missing screenshot) is surfaced but never aborts the run."""
+    script = pkg / "gen_html.py"
+    if not script.exists():
+        return
+    try:
+        r = subprocess.run([sys.executable, str(script)], cwd=str(pkg),
+                           capture_output=True, text=True, timeout=300)
+    except Exception as e:
+        console.print(f"[yellow]Could not run gen_html.py ({e}); final_report.html not generated.[/yellow]")
+        return
+    if r.stdout:
+        console.print(r.stdout.rstrip())
+    html = pkg / "final_report.html"
+    if html.exists() and r.returncode == 0:
+        console.print(f"[green]✓ HTML report: {html}[/green]")
+    elif html.exists():
+        console.print(f"[yellow]HTML report written WITH WARNINGS (see summary above): {html}[/yellow]")
+    else:
+        console.print("[yellow]final_report.html was not produced — see gen_html.py output above.[/yellow]")
 
 
 def _tool_summary(inp: dict) -> str:
@@ -631,7 +676,7 @@ def print_next_steps(pkg: Path, config, console: Console) -> None:
         "[bold]1) Hand the package to an AI to triage — pick a backend:[/bold]",
         "   • [bold]Claude Code[/bold] (best — reads the screenshots, can verify on-device):",
         f"       [white]cd '{pkg}' && claude[/white]   [dim]then say: follow PROMPT.md[/dim]",
-        f"       [white]cd '{pkg}' && ./run_review.sh[/white]   [dim]headless → writes final_report.md[/dim]",
+        f"       [white]cd '{pkg}' && ./run_review.sh[/white]   [dim]headless → final_report.md + .html[/dim]",
         "   • [bold]Any other agentic backend[/bold] (OpenRouter / Ollama / aider / custom CLI):",
         "       [white]export TRASHIOS_REVIEW_CMD='aider --message-file {prompt_file} --yes'[/white]",
         "       [dim]then ./run_review.sh (or re-run with --ai-review). {prompt_file}=PROMPT.md path, {prompt}=inlined text.[/dim]",
@@ -646,5 +691,7 @@ def print_next_steps(pkg: Path, config, console: Console) -> None:
         "[bold]3) Then:[/bold] review [white]final_report.md[/white]. For every 'Likely' finding the AI will "
         "verify it live on the connected jailbroken iPhone (decode DB/keychain values, re-fire URL "
         "schemes logged-out, grep memory) and regenerate the report with a confirmed PoC + evidence.",
+        "[dim]   The shareable [white]final_report.html[/white] (every screenshot embedded, copy buttons, "
+        "filterable triage) is built automatically from final_report.md by the bundled gen_html.py.[/dim]",
     ]
     console.print(Panel("\n".join(lines), title="Next steps — AI triage", style="cyan", expand=False))

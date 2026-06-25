@@ -2,6 +2,25 @@
 
 All notable changes to TrashiOS are documented here.
 
+## [0.3.8] — Deterministic HTML report (bundled gen_html.py)
+
+### Changed — AI-review HTML
+- `final_report.html` is now produced by a **bundled, deterministic generator** (`ai_review/gen_html.py`) instead of being hand-written by the reviewing AI. The AI writes `final_report.md` and runs `python3 gen_html.py` as its final step; the script converts the Markdown + `screenshots/` into ONE self-contained HTML — every screenshot embedded as base64, a Copy button on every code/secret block, a sticky section nav, auto-filled stat cards, and a filterable triage table (Actionable / Confirmed / False-positive). The black-&-white theme is fixed, so the report looks identical every run and the AI spends **~0 tokens on design**.
+- The generator **self-validates** and prints PASS/FAIL: it asserts every referenced screenshot was embedded, copy-buttons == code-blocks, no stray fences/placeholders, the triage table was found, and no external asset URLs remain — exiting non-zero (with a visible placeholder) if a screenshot is missing, so a broken report can never ship silently.
+- **Auto-runs end-to-end**: `run_review.sh` and the `--ai-review` / interactive paths regenerate the HTML from `final_report.md` automatically, so the HTML always reflects the final report.
+- Stat counts and section nav are **auto-derived** from the report (no per-report hand-edits).
+- New deps: `markdown` and `Pillow` (Pillow degrades gracefully — embeds full-size if absent).
+
+## [0.3.7] — Security hardening + reliability fixes
+
+### Fixed
+- **Shell-injection hardening.** Every SSH command that interpolated a `bundle_id` or test `url` now wraps it with `shlex.quote()` — `launch_app`'s `uiopen` fallback and the container-resolution `grep` calls (`core/ios_device.py`), and the URL-scheme `uiopen` path (`phases/url_schemes.py`). No behaviour change for normal identifiers.
+- **`run_review.sh`**: replaced bare `eval "$TRASHIOS_REVIEW_CMD"` with `sh -c` so a poisoned env var can't execute arbitrary shell (`core/ai_review.py`).
+- **Pasteboard phase**: fixed an `AttributeError` crash when Frida returned output only on stderr (`res.stdout` was `None`) — now `(res.stdout or "").strip()` (`phases/pasteboard.py`).
+- **Keychain dump**: `session.detach()` moved into a `finally` block so the Frida session is always released even when the agent script raises, preventing leaked attaches (`core/frida_bridge.py`).
+- **Backup phase**: a `Manifest.db` SQLite error is now surfaced as a Low finding instead of being swallowed by a bare `except: pass` (`phases/backup.py`).
+- **Syslog phase**: added a liveness check after the reader-thread join so a stuck thread is reported, not silently leaked (`phases/syslog.py`).
+
 ## [0.3.6] — Document every finding ≥ Low + proper VAPT ticket format
 
 ### Changed — AI-review report

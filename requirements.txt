@@ -1,5 +1,10 @@
 rich>=13.0
 
+# HTML report generator: ai_review/gen_html.py turns final_report.md into a
+# self-contained final_report.html (markdown -> HTML; Pillow downscales screenshots).
+markdown>=3.4
+Pillow>=9.0
+
 # Runtime instrumentation (the Drozer-equivalent layer).
 # frida-tools provides frida / frida-ps; objection drives high-level iOS introspection.
 frida-tools>=12.0
