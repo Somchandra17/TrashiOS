@@ -18,6 +18,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![Platform](https://img.shields.io/badge/platform-macOS-000000?style=flat-square&logo=apple&logoColor=white)](#)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
+[![Release](https://img.shields.io/badge/release-v1.0.0-success?style=flat-square)](CHANGELOG.md)
 [![Changelog](https://img.shields.io/badge/changelog-CHANGELOG.md-blue?style=flat-square)](CHANGELOG.md)
 
 ---
@@ -62,6 +63,10 @@ brew install libimobiledevice libusbmuxd ideviceinstaller
 # runtime instrumentation
 pip install -r requirements.txt          # rich + frida-tools + objection
 
+# optional — ML-assisted PII detection (enables --presidio / --ner)
+pip install -r requirements-presidio.txt # checksum-validated PII   (--presidio)
+pip install -r requirements-ner.txt      # GLiNER NER backend       (--ner)
+
 # non-interactive SSH password auth (or set up SSH keys instead)
 brew install sshpass
 
@@ -82,7 +87,7 @@ brew install class-dump                   # optional: ObjC headers
 ## Quick Start
 
 ```bash
-git clone <this-repo> && cd TrashiOS
+git clone https://github.com/Somchandra17/TrashiOS.git && cd TrashiOS
 pip install -r requirements.txt
 
 # plug in the phone, then:
@@ -92,8 +97,8 @@ python main.py                 # interactive
 # non-interactive against an installed app:
 python main.py --auto --device <UDID> --bundle com.example.app
 
-# run specific phases (1=static, 3=keychain, 5=URL schemes):
-python main.py --phases 1,3,5 --bundle com.example.app
+# run specific phases (2=static, 5=keychain, 10=URL schemes):
+python main.py --phases 2,5,10 --bundle com.example.app
 ```
 
 The framework starts the SSH-over-USB tunnel itself (`iproxy <local-port> <ssh-port>`). If your jailbreak uses port 22 (classic checkra1n) instead of 44, pass `--ssh-port 22`.
@@ -212,7 +217,7 @@ The triage prompt lives in `ai_review/PROMPT.md`; the full VAPT reporting standa
 
 ## Status
 
-All 13 phases are implemented (Milestone 2 complete) and validated end-to-end on a jailbroken iPhone X (iOS 16.7.5). Compatible with **Frida 17** (the ObjC bridge is loaded from `frida-tools` and the agents use the Frida 17 APIs). Possible future refinements: Universal Links / app-extension (`.appex`) testing in Phase X, a `keychain-dumper` SSH fallback for managed/anti-Frida apps in Phase V, and aligning the report with a Jira/VAPT ticket exporter.
+**v1.0.0 — stable.** All 13 phases are implemented and validated end-to-end on a jailbroken iPhone X (A11, iOS 16.7.5), compatible with **Frida 17** (the ObjC bridge is loaded from `frida-tools` and the agents use the Frida 17 APIs). Possible future refinements: Universal Links / app-extension (`.appex`) testing in Phase X, a `keychain-dumper` SSH fallback for managed/anti-Frida apps in Phase V, bounding the Frida session teardown so heavy MAM/anti-instrumentation can't stall the memory phase, and a Jira/VAPT ticket exporter.
 
 ---
 
