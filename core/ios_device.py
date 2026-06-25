@@ -127,7 +127,7 @@ class IOSDevice:
             caps.afc = False
         # frida over USB
         try:
-            r = subprocess.run(["frida-ps", "-U"], capture_output=True, text=True, timeout=15)
+            r = subprocess.run(["frida-ps", "-U"], capture_output=True, text=True, timeout=TIMING.frida_ps_timeout)
             caps.frida = r.returncode == 0
         except Exception:
             caps.frida = False
@@ -312,7 +312,7 @@ class IOSDevice:
     def get_pid(self, bundle_id: str) -> Optional[str]:
         """PID of the running app via `frida-ps -Ua` (identifier match)."""
         try:
-            r = subprocess.run(["frida-ps", "-Ua"], capture_output=True, text=True, timeout=15)
+            r = subprocess.run(["frida-ps", "-Ua"], capture_output=True, text=True, timeout=TIMING.frida_ps_timeout)
         except (FileNotFoundError, subprocess.TimeoutExpired):
             return None
         for line in r.stdout.splitlines():
@@ -325,7 +325,7 @@ class IOSDevice:
         """Spawn the app. Prefer Frida (clean PID), fall back to SSH uiopen."""
         try:
             import frida
-            dev = frida.get_usb_device(timeout=5)
+            dev = frida.get_usb_device(timeout=TIMING.frida_device_timeout)
             pid = dev.spawn([bundle_id])
             dev.resume(pid)
             return f"spawned pid={pid}"

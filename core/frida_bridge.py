@@ -25,11 +25,14 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 from rich.console import Console
+
+from core.config import TIMING
 
 console = Console()
 
@@ -96,7 +99,7 @@ class FridaBridge:
 
     def verify_connection(self) -> bool:
         try:
-            r = subprocess.run(["frida-ps", "-U"], capture_output=True, text=True, timeout=15)
+            r = subprocess.run(["frida-ps", "-U"], capture_output=True, text=True, timeout=TIMING.frida_ps_timeout)
             return r.returncode == 0
         except (FileNotFoundError, subprocess.TimeoutExpired):
             return False
@@ -109,7 +112,6 @@ class FridaBridge:
         path = self.device.shell_output("which frida-server 2>/dev/null || echo /usr/sbin/frida-server")
         if path:
             self.device.shell(f"nohup {path} >/dev/null 2>&1 &")
-            import time
             time.sleep(2)
         return self.verify_connection()
 
@@ -184,16 +186,18 @@ rpc.exports = {
         """Dump keychain items via a raw Frida agent (objection-free; works on Frida 17).
         Returns (items, error_message). Each item: {cls, account, service, agrp, accessible, data}."""
         try:
-            import frida, time
+            import frida
         except Exception as e:
             return [], f"frida python binding unavailable: {e}"
         try:
-            dev = frida.get_usb_device(timeout=5)
+            dev = frida.get_usb_device(timeout=TIMING.frida_device_timeout)
         except Exception as e:
             return [], f"no USB device: {e}"
         pid = self.device.get_pid(self.bundle_id)
         try:
             if not pid:
+                # Deliberately longer than the Frida spawn settle: the keychain agent walks
+                # the ObjC bridge, which needs the app fully up before attach.
                 pid = dev.spawn([self.bundle_id]); dev.resume(pid); time.sleep(4)
             session = dev.attach(int(pid))
         except Exception as e:
@@ -221,7 +225,7 @@ rpc.exports = {
         return self._objection_run(f"ios plist cat '{path}'")
 
     def sqlite_connect(self, path: str) -> RuntimeResult:
-        return self._objection_run(f"ios sqlite connect '{path}'", timeout=120)
+        return self._objection_run(f"ios sqlite connect '{path}'", timeout=TIMING.db_query_timeout)
 
     def cookies(self) -> RuntimeResult:
         return self._objection_run("ios cookies get")
@@ -244,10 +248,10 @@ rpc.exports = {
         return out
 
     def disable_sslpinning(self) -> RuntimeResult:
-        return self._objection_run("ios sslpinning disable", timeout=60)
+        return self._objection_run("ios sslpinning disable", timeout=TIMING.objection_command_timeout)
 
     def disable_jailbreak_detect(self) -> RuntimeResult:
-        return self._objection_run("ios jailbreak disable", timeout=60)
+        return self._objection_run("ios jailbreak disable", timeout=TIMING.objection_command_timeout)
 
     # ── raw Frida (spawn / custom agents — memory dump, hooks) ───
 
@@ -276,8 +280,7 @@ rpc.exports = {
         jailbreak-tool-independent alternative to `uiopen`. The app must be running."""
         try:
             import frida
-            import time
-            dev = frida.get_usb_device(timeout=5)
+            dev = frida.get_usb_device(timeout=TIMING.frida_device_timeout)
             pid = self.device.get_pid(self.bundle_id)
             if not pid:
                 pid = dev.spawn([self.bundle_id])
@@ -302,11 +305,11 @@ rpc.exports = {
         each fire (e.g. to screenshot the resulting state)."""
         results: dict[str, bool] = {}
         try:
-            import frida, time
-            dev = frida.get_usb_device(timeout=5)
+            import frida
+            dev = frida.get_usb_device(timeout=TIMING.frida_device_timeout)
             pid = self.device.get_pid(self.bundle_id)
             if not pid:
-                pid = dev.spawn([self.bundle_id]); dev.resume(pid); time.sleep(3)
+                pid = dev.spawn([self.bundle_id]); dev.resume(pid); time.sleep(TIMING.frida_spawn_settle)
             session = dev.attach(int(pid))
             script = session.create_script(_with_objc(self._OPENURL_JS))
             script.load()
@@ -336,7 +339,7 @@ rpc.exports = {
     def spawn(self) -> Optional[int]:
         try:
             import frida
-            dev = frida.get_usb_device(timeout=5)
+            dev = frida.get_usb_device(timeout=TIMING.frida_device_timeout)
             pid = dev.spawn([self.bundle_id])
             dev.resume(pid)
             return pid
@@ -348,7 +351,7 @@ rpc.exports = {
         """Load a custom Frida JS agent and call one of its rpc.exports (memory phase)."""
         try:
             import frida
-            dev = frida.get_usb_device(timeout=5)
+            dev = frida.get_usb_device(timeout=TIMING.frida_device_timeout)
             pid = attach_pid or self.device.get_pid(self.bundle_id)
             if not pid:
                 pid = dev.spawn([self.bundle_id]); dev.resume(pid)
@@ -397,19 +400,19 @@ rpc.exports = {
         destroyed by anti-tamper/MAM, no readable ranges).
         """
         try:
-            import frida, time, threading
+            import frida, threading
         except Exception as e:
             return RuntimeResult("frida", "dump_memory", "", f"frida python binding unavailable: {e}", False)
 
         try:
-            dev = frida.get_usb_device(timeout=5)
+            dev = frida.get_usb_device(timeout=TIMING.frida_device_timeout)
         except Exception as e:
             return RuntimeResult("frida", "dump_memory", "", f"no USB device: {e}", False)
 
         pid = self.device.get_pid(self.bundle_id)
         if not pid:
             try:
-                pid = dev.spawn([self.bundle_id]); dev.resume(pid); time.sleep(3)
+                pid = dev.spawn([self.bundle_id]); dev.resume(pid); time.sleep(TIMING.frida_spawn_settle)
             except Exception as e:
                 return RuntimeResult("frida", "dump_memory", "", f"spawn failed: {e}", False)
         try:
@@ -507,11 +510,11 @@ rpc.exports = { start: function () {
     def pasteboard_monitor(self, seconds: int = 15) -> RuntimeResult:
         """Monitor the general (system) pasteboard for `seconds` and return distinct values seen."""
         try:
-            import frida, time
-            dev = frida.get_usb_device(timeout=5)
+            import frida
+            dev = frida.get_usb_device(timeout=TIMING.frida_device_timeout)
             pid = self.device.get_pid(self.bundle_id)
             if not pid:
-                pid = dev.spawn([self.bundle_id]); dev.resume(pid); time.sleep(3)
+                pid = dev.spawn([self.bundle_id]); dev.resume(pid); time.sleep(TIMING.frida_spawn_settle)
             session = dev.attach(int(pid))
             script = session.create_script(_with_objc(self._PASTEBOARD_JS))
             seen: list[str] = []
@@ -597,14 +600,14 @@ rpc.exports = {
         """Render the running app's windows to a PNG via Frida (no Developer Disk Image needed).
         Captures the target app's screen — sufficient for the phases that screenshot."""
         try:
-            import frida, time
+            import frida
         except Exception:
             return False
         pid = self.device.get_pid(self.bundle_id)
         if not pid:
             return False
         try:
-            dev = frida.get_usb_device(timeout=5)
+            dev = frida.get_usb_device(timeout=TIMING.frida_device_timeout)
             session = dev.attach(int(pid))
         except Exception:
             return False

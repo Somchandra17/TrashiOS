@@ -173,6 +173,10 @@ class Timing:
     polling_retries: int = 3
     file_pull_timeout: int = 300
     ssh_connect_timeout: int = 10
+    frida_device_timeout: int = 5        # frida.get_usb_device()
+    frida_ps_timeout: int = 15           # frida-ps -U / -Ua
+    frida_spawn_settle: int = 3          # post-spawn settle before attach
+    objection_command_timeout: int = 60  # objection sslpinning / jailbreak disable
 
 
 @dataclass
