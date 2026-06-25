@@ -8,7 +8,11 @@ plus optional partial-report generation on signal/exit.
 
 from __future__ import annotations
 
+from rich.console import Console
+
 from core.report import ReportGenerator
+
+console = Console()
 
 
 class RuntimeCleanupManager:
@@ -62,6 +66,6 @@ class RuntimeCleanupManager:
             try:
                 reporter = ReportGenerator(self.config, self.device_info)
                 path = reporter.generate()
-                print(f"\n[Cleanup] Partial report saved to: {path}")
-            except Exception:
-                pass
+                console.print(f"[green]\u2713 Partial report saved to:[/green] {path}")
+            except Exception as e:
+                console.print(f"[yellow]Partial report generation failed: {e}[/yellow]")

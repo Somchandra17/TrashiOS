@@ -3,3 +3,5 @@ shared config/state, the report engine, the AI-review packager, and PII detectio
 
 Import submodules directly, e.g. ``from core.ios_device import IOSDevice``.
 """
+
+__version__ = "1.0.0"

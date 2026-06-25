@@ -27,6 +27,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.align import Align
 
+from core import __version__
 from core.config import Config, BANNER
 from core.ios_device import IOSDevice
 from core.frida_bridge import FridaBridge
@@ -75,7 +76,15 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="iOS SAST/DAST — Automated VAPT Framework (TrashiOS)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "examples:\n"
+            "  python main.py                                   interactive (pick device + app)\n"
+            "  python main.py --auto --bundle com.example.app   non-interactive, all 13 phases\n"
+            "  python main.py --phases 1,3,5 --bundle com.x      run only the named phases\n"
+            "  python main.py --track static --bundle com.x      SAST-only (no device dynamics)\n"
+        ),
     )
+    parser.add_argument("--version", action="version", version=f"TrashiOS {__version__}")
     parser.add_argument("--skip-preflight", action="store_true", help="Skip host-tool availability checks")
     parser.add_argument("--phases", type=str, default="",
                         help="Comma-separated phase numbers to run (e.g. 1,3,5). Default: all")
@@ -102,7 +111,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--backup", action="store_true",
                         help="Run the (slow) full device backup in Phase XII")
     parser.add_argument("--ai-review", action="store_true",
-                        help="After the run, auto-run `claude` headless over the ai_review/ package to write final_report.md")
+                        help="After the run, auto-run `claude` headless over the ai_review/ package to write final_report.md (+ final_report.html)")
     parser.add_argument("--presidio", action="store_true",
                         help="Enable Presidio PII detection (regex + checksum validators); falls back to regex on init failure")
     parser.add_argument("--ner", action="store_true",
@@ -113,7 +122,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
 
-    console.print(Align.left(Panel(BANNER, style="bright_white", expand=True, subtitle="Author: 0xs0m")))
+    console.print(Align.left(Panel(BANNER, style="bright_white", expand=True,
+                                   subtitle=f"v{__version__}  \u00b7  Author: 0xs0m")))
 
     # ── Pre-flight ──
     if not args.skip_preflight:

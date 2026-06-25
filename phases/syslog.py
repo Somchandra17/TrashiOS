@@ -1,5 +1,5 @@
 """
-Phase IV — Device Log Monitoring (the iOS logcat equivalent).
+Phase VIII — Device Log Monitoring (the iOS logcat equivalent).
 
 Captures device logs via idevicesyslog while the app is exercised, then scans
 for leaked secrets/PII, cleartext HTTP, SQL statements, and crash/exception

@@ -206,7 +206,7 @@ cd output/com.example.app/ai_review && ./run_review.sh   # headless → final_re
 
 > **Agentic vs. plain chat:** viewing screenshots and running live on-device verification needs a tool with filesystem/image access (Claude Code, aider). A plain cloud chat can still triage the text from `report.md` + `findings.json`, just without image viewing or a live PoC.
 
-The triage prompt lives in `ai_review/PROMPT.md`; if you have a `vapt-ticket-writer` skill installed, Claude uses it to format the tickets.
+The triage prompt lives in `ai_review/PROMPT.md`; the full VAPT reporting standard (ticket field order, CVSS calibration, CWE root-cause selection) is embedded directly in it — no external skill or plugin is required.
 
 ---
 

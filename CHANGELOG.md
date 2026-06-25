@@ -2,6 +2,41 @@
 
 All notable changes to TrashiOS are documented here.
 
+## [1.0.0] — First stable release (final polish pass)
+
+Milestone release: a full cross-codebase polish pass over correctness, consistency, the CLI and
+HTML "UI", and test coverage. No behavioural regressions — verified end-to-end.
+
+### Added
+- **Version identity.** Single source of truth `core.__version__ = "1.0.0"`; a `--version` flag and
+  a usage `epilog` on `--help`; the startup banner now shows `v1.0.0`.
+- **Tests.** New `tests/test_gen_html.py` (HTML generation + auto-derived stats/nav + the
+  self-validation hard-fail on a missing screenshot) and a shlex-quoting regression test for the
+  SSH `uiopen` fallback. Owned suites: 25 passing.
+
+### Changed — code quality
+- `get_device_info` now makes **one** `ideviceinfo` call (parsed into a dict) instead of 3–4
+  per-key subprocesses.
+- Extracted a shared `_ssh_base_opts()` used by both `_ssh_argv` and `_scp_argv` (was duplicated).
+- De-duplicated the Presidio regex-fallback finding into one `_sensitive_pattern_finding` helper
+  used by both `presidio_scan_text` and `presidio_scan_file`.
+- Dropped a dead unused field from the keychain `_PDMN` protection-class table.
+- `runtime_cleanup` uses the rich `console` (no stray `print`) and now surfaces a failed
+  partial-report generation instead of swallowing it.
+
+### Changed — HTML report (`gen_html.py`)
+- Added a **print stylesheet** (`@media print`: hides the nav/filters/copy controls, avoids
+  page-breaks inside tables/figures/code) for clean PDF export.
+- Added keyboard **focus-visible outlines**; constrained screenshot width to `min(100%, 820px)`;
+  scoped the sticky table header below the nav so they no longer collide.
+
+### Fixed — consistency & docs
+- Corrected 5 phase module-docstring numbers that still carried the pre-0.2.0 numbering
+  (static II, storage III, syslog VIII, URL-scheme X, post-logout XI); all 13 now match their
+  `PHASE` constants and `main.py` order.
+- README no longer claims an external `vapt-ticket-writer` skill is needed — the VAPT reporting
+  standard has been embedded in `PROMPT.md` since 0.3.5.
+
 ## [0.3.8] — Deterministic HTML report (bundled gen_html.py)
 
 ### Changed — AI-review HTML

@@ -1,5 +1,5 @@
 """
-Phase I — Static Binary & Info.plist Analysis  (the iOS "manifest" + binary hardening).
+Phase II — Static Binary & Info.plist Analysis  (the iOS "manifest" + binary hardening).
 
 Obtains the app bundle (pulled from device over SSH, or unzipped from a local
 IPA), then inspects:

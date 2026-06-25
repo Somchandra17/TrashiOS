@@ -27,6 +27,19 @@ def grep_sensitive_lines(text: str, max_lines: int = 200) -> str:
 
 # ── Presidio-aware scanning helpers ────────────────────────────
 
+def _sensitive_pattern_finding(matches: str, source: str) -> list[dict]:
+    """The regex-fallback finding, shared by presidio_scan_text/file (so they can't drift)."""
+    return [{
+        "entity_type": "SENSITIVE_PATTERN",
+        "text": matches,
+        "score": 0.5,
+        "context": "",
+        "source": source,
+        "severity": "High",
+        "needs_validation": True,
+    }]
+
+
 def presidio_scan_text(
     text: str,
     config,
@@ -61,17 +74,7 @@ def presidio_scan_text(
 
     # Regex fallback
     matches = grep_sensitive_lines(text)
-    if matches:
-        return [{
-            "entity_type": "SENSITIVE_PATTERN",
-            "text": matches,
-            "score": 0.5,
-            "context": "",
-            "source": source_label,
-            "severity": "High",
-            "needs_validation": True,
-        }]
-    return []
+    return _sensitive_pattern_finding(matches, source_label) if matches else []
 
 
 def presidio_scan_file(
@@ -102,15 +105,7 @@ def presidio_scan_file(
         content = Path(file_path).read_text(encoding="utf-8", errors="replace")
         matches = grep_sensitive_lines(content)
         if matches:
-            return [{
-                "entity_type": "SENSITIVE_PATTERN",
-                "text": matches,
-                "score": 0.5,
-                "context": "",
-                "source": source_label or str(file_path),
-                "severity": "High",
-                "needs_validation": True,
-            }]
+            return _sensitive_pattern_finding(matches, source_label or str(file_path))
     except Exception:
         pass
     return []

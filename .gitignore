@@ -29,6 +29,10 @@ todo.txt
 Thumbs.db
 plans/
 
+# Browser-automation / demo recording artifacts
+.playwright-mcp/
+*.cast
+
 # GLiNER / Hugging Face model cache
 .cache/
 model_cache/

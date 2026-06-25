@@ -148,13 +148,10 @@ class IOSDevice:
         """`-u <udid>` for libimobiledevice tools when a UDID is pinned."""
         return ["-u", self.udid] if self.udid else []
 
-    def _ssh_argv(self, remote_cmd: str) -> list[str]:
-        argv: list[str] = []
-        if self._sshpass:
-            argv += ["sshpass", "-p", self.ssh_pw]
-        argv += [
-            "ssh",
-            "-p", str(self.local_port),
+    def _ssh_base_opts(self) -> list[str]:
+        """Shared `-o` options for ssh/scp: host-key relaxation, timeout, legacy-RSA,
+        and (under sshpass) password-only auth."""
+        opts = [
             "-o", "StrictHostKeyChecking=no",
             "-o", "UserKnownHostsFile=/dev/null",
             "-o", f"ConnectTimeout={TIMING.ssh_connect_timeout}",
@@ -163,8 +160,15 @@ class IOSDevice:
             "-o", "PubkeyAcceptedAlgorithms=+ssh-rsa",
         ]
         if self._sshpass:
-            argv += ["-o", "PreferredAuthentications=password",
+            opts += ["-o", "PreferredAuthentications=password",
                      "-o", "PubkeyAuthentication=no"]
+        return opts
+
+    def _ssh_argv(self, remote_cmd: str) -> list[str]:
+        argv: list[str] = []
+        if self._sshpass:
+            argv += ["sshpass", "-p", self.ssh_pw]
+        argv += ["ssh", "-p", str(self.local_port)] + self._ssh_base_opts()
         argv += ["root@127.0.0.1", remote_cmd]
         return argv
 
@@ -172,19 +176,7 @@ class IOSDevice:
         argv: list[str] = []
         if self._sshpass:
             argv += ["sshpass", "-p", self.ssh_pw]
-        argv += [
-            "scp", "-O", "-r",
-            "-P", str(self.local_port),
-            "-o", "StrictHostKeyChecking=no",
-            "-o", "UserKnownHostsFile=/dev/null",
-            "-o", f"ConnectTimeout={TIMING.ssh_connect_timeout}",
-            "-o", "LogLevel=ERROR",
-            "-o", "HostKeyAlgorithms=+ssh-rsa",
-            "-o", "PubkeyAcceptedAlgorithms=+ssh-rsa",
-        ]
-        if self._sshpass:
-            argv += ["-o", "PreferredAuthentications=password",
-                     "-o", "PubkeyAuthentication=no"]
+        argv += ["scp", "-O", "-r", "-P", str(self.local_port)] + self._ssh_base_opts()
         argv += [f"root@127.0.0.1:{remote}", local]
         return argv
 
@@ -225,17 +217,21 @@ class IOSDevice:
         return "uid=0" in self.shell_output("id")
 
     def get_device_info(self) -> dict:
-        def k(key: str) -> str:
-            try:
-                r = subprocess.run(["ideviceinfo", "-k", key] + self._u(),
-                                   capture_output=True, text=True, timeout=10)
-                return r.stdout.strip()
-            except Exception:
-                return ""
+        """Device model / iOS version / build from a single `ideviceinfo` call."""
+        info: dict[str, str] = {}
+        try:
+            r = subprocess.run(["ideviceinfo"] + self._u(),
+                               capture_output=True, text=True, timeout=10)
+            for line in r.stdout.splitlines():
+                if ": " in line:
+                    key, _, val = line.partition(": ")
+                    info[key.strip()] = val.strip()
+        except Exception:
+            pass
         return {
-            "model": k("ProductType") or k("DeviceName") or "iOS device",
-            "ios_version": k("ProductVersion"),
-            "build": k("BuildVersion"),
+            "model": info.get("ProductType") or info.get("DeviceName") or "iOS device",
+            "ios_version": info.get("ProductVersion", ""),
+            "build": info.get("BuildVersion", ""),
         }
 
     # ── app management (mirror ADB) ──────────────────────────────

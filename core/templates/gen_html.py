@@ -58,6 +58,7 @@ body{margin:0;background:#fff;color:var(--ink);
  -webkit-font-smoothing:antialiased;}
 .wrap{max-width:980px;margin:0 auto;padding:0 22px 80px;}
 a{color:#000;text-decoration:underline;text-underline-offset:2px;}
+a:focus-visible,button:focus-visible{outline:2px solid #000;outline-offset:2px;}
 h1{font-size:30px;line-height:1.25;margin:30px 0 6px;letter-spacing:-.3px;}
 h2{font-size:23px;margin:46px 0 14px;padding-bottom:8px;border-bottom:2px solid #000;scroll-margin-top:60px;}
 h3{font-size:18px;margin:30px 0 10px;scroll-margin-top:64px;}
@@ -78,7 +79,8 @@ nav.top a:hover{background:#000;color:#fff;border-color:#000;}
 .stat span{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;}
 table{border-collapse:collapse;width:100%;margin:16px 0;font-size:14px;}
 th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top;}
-th{background:#000;color:#fff;font-weight:600;position:sticky;top:0;}
+th{background:#000;color:#fff;font-weight:600;}
+#triage th{position:sticky;top:42px;z-index:1;}
 #triage tbody tr:nth-child(even){background:var(--soft);}
 #triage tbody tr:hover{background:var(--soft2);}
 td:first-child{font-family:ui-monospace,Menlo,monospace;white-space:nowrap;font-weight:600;}
@@ -102,12 +104,21 @@ td:first-child{font-family:ui-monospace,Menlo,monospace;white-space:nowrap;font-
  padding:5px 10px;border:1px solid #000;background:#fff;color:#000;border-radius:4px;cursor:pointer;text-transform:uppercase;}
 .copy:hover,.copy.done{background:#000;color:#fff;}
 figure{margin:16px 0;border:1px solid var(--line);padding:8px;background:var(--soft);}
-figure img{display:block;max-width:100%;height:auto;margin:0 auto;border:1px solid var(--line);}
+figure img{display:block;max-width:min(100%,820px);height:auto;margin:0 auto;border:1px solid var(--line);}
 figcaption{font-size:12.5px;color:var(--muted);margin-top:8px;text-align:center;font-style:italic;}
 .missingbox{border:1px dashed #888;padding:26px 14px;text-align:center;color:#888;
  font-style:italic;font-size:13px;background:#fff;}
 blockquote{border-left:3px solid #000;margin:10px 0;padding:2px 14px;color:#333;}
 @media(max-width:620px){.wrap{padding:0 14px 60px;}h1{font-size:24px;}nav.top{gap:3px;}}
+@media print{
+ nav.top,.filters,.copy{display:none;}
+ .wrap{padding:0;max-width:100%;}
+ a{text-decoration:none;color:#000;}
+ #triage th{position:static;}
+ table,figure,.codewrap{page-break-inside:avoid;}
+ h2,h3{page-break-after:avoid;}
+ .codewrap pre{white-space:pre-wrap;word-break:break-word;}
+}
 """
 
 JS = r"""

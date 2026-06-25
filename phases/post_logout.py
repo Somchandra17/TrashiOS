@@ -1,5 +1,5 @@
 """
-Phase VI — Post-Logout / Session & Access-Control Testing.
+Phase XI — Post-Logout / Session & Access-Control Testing.
 
 After logout, proves (a) authenticated screens are still reachable via URL
 schemes/deeplinks, and (b) session tokens persist locally (keychain / prefs)

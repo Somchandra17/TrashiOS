@@ -1,5 +1,5 @@
 """
-Phase VII — Pasteboard / Clipboard Leakage.
+Phase VII — Pasteboard Leakage.
 
 The general (system) UIPasteboard is readable by ANY app on the device. Apps
 that copy secrets (passwords, OTPs, tokens, card numbers) to it leak them. This

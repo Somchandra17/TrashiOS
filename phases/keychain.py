@@ -28,13 +28,13 @@ PHASE = "Phase V — Keychain Dump & Data Protection"
 # kSecAttrAccessible protection classes, keyed by the on-disk "pdmn" code.
 # value = (readable name, this_device_only, accessible_while_locked)
 _PDMN = {
-    "ak":   ("WhenUnlocked", False, False),
-    "ck":   ("AfterFirstUnlock", False, False),
-    "dk":   ("Always", False, True),
-    "aku":  ("WhenUnlockedThisDeviceOnly", True, False),
-    "cku":  ("AfterFirstUnlockThisDeviceOnly", True, False),
-    "dku":  ("AlwaysThisDeviceOnly", True, True),
-    "akpu": ("WhenPasscodeSetThisDeviceOnly", True, False),
+    "ak":   ("WhenUnlocked", False),
+    "ck":   ("AfterFirstUnlock", False),
+    "dk":   ("Always", False),
+    "aku":  ("WhenUnlockedThisDeviceOnly", True),
+    "cku":  ("AfterFirstUnlockThisDeviceOnly", True),
+    "dku":  ("AlwaysThisDeviceOnly", True),
+    "akpu": ("WhenPasscodeSetThisDeviceOnly", True),
 }
 
 
@@ -105,7 +105,7 @@ def _assess_protection_classes(config: Config, items: list[dict]) -> None:
         if not info:
             unknown.append(tag)
             continue
-        _, device_only, _ = info
+        _, device_only = info
         if code == "dk":
             always_not_device.append(tag)
         elif code == "dku":

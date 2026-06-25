@@ -34,12 +34,9 @@ class TestIOSDeviceParsing(unittest.TestCase):
 
     @patch("core.ios_device.subprocess.run")
     def test_get_device_info_maps_keys(self, run_mock):
-        def side(argv, **kw):
-            key = argv[argv.index("-k") + 1]
-            return _cp(stdout={"ProductType": "iPhone10,3",
-                               "ProductVersion": "16.5",
-                               "BuildVersion": "20F66"}.get(key, ""))
-        run_mock.side_effect = side
+        run_mock.return_value = _cp(stdout="ProductType: iPhone10,3\n"
+                                           "ProductVersion: 16.5\n"
+                                           "BuildVersion: 20F66\n")
         info = IOSDevice(udid="u").get_device_info()
         self.assertEqual(info["model"], "iPhone10,3")
         self.assertEqual(info["ios_version"], "16.5")
@@ -116,6 +113,24 @@ class TestIOSDeviceParsing(unittest.TestCase):
         self.assertEqual(data, "/var/mobile/Containers/Data/Application/UUID-D")
         self.assertEqual(bundle, "/var/containers/Bundle/Application/UUID-B/Example.app")
         self.assertEqual(exe, "Example")
+
+    def test_launch_app_quotes_malicious_bundle_id(self):
+        """0.3.7 regression: bundle_id is shlex-quoted in the SSH uiopen fallback,
+        so a crafted bundle id cannot break out of the shell command."""
+        import types
+        def _raise(**kw):
+            raise RuntimeError("no usb device")
+        frida_stub = types.SimpleNamespace(get_usb_device=_raise)
+        captured = []
+        dev = IOSDevice(udid="u")
+        with patch.dict(sys.modules, {"frida": frida_stub}), \
+             patch.object(IOSDevice, "shell",
+                          lambda self, cmd, **k: captured.append(cmd) or _cp(stdout="ok")):
+            dev.launch_app("com.x'; touch /pwned #")
+        cmd = captured[0]
+        # the quote-breakout sequence must not survive; the payload is neutralised in quotes
+        self.assertNotIn("com.x'; touch", cmd)
+        self.assertIn("touch /pwned", cmd)
 
 
 class TestFridaBridge(unittest.TestCase):
