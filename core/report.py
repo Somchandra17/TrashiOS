@@ -409,35 +409,69 @@ class ReportGenerator:
         report_path = c.output_dir / report_name
         deduped_findings = _dedupe_findings(c)
         coverage = _phase_coverage(c, deduped_findings)
-
-        sections: list[str] = []
         used_screenshot_paths: set[str] = set()
 
+        # Built in fixed order; "\n".join over the concatenated helper output is
+        # byte-identical to the previous single-list assembly.
+        sections: list[str] = []
+        sections += self._render_header(now)
+        summary_lines, severity_counts = self._render_summary(deduped_findings, coverage)
+        sections += summary_lines
+        sections += self._render_phase_coverage(coverage)
+        sections += self._render_pii_entities(deduped_findings)
+        sections += self._render_findings(deduped_findings, coverage, used_screenshot_paths)
+        sections += self._render_manual_steps()
+        sections += self._render_commands_log()
+        sections += self._render_risk_summary(deduped_findings)
+
+        full_report = "\n".join(sections)
+        try:
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text(full_report, encoding="utf-8")
+        except OSError as e:
+            raise RuntimeError(f"Failed to write report to {report_path}: {e}") from e
+
+        # Same `now` as the header so the .md and JSON timestamps come from one clock read.
+        self._build_json_export(deduped_findings, severity_counts, now)
+        return str(report_path)
+
+    # ── render helpers — each returns its section's lines (see generate()) ──
+
+    def _render_header(self, now: str) -> list[str]:
+        """Title block + run metadata (and the AI triage prompt in internal mode)."""
+        c = self.config
+        out: list[str] = []
         # ── AI prompt ──
         if c.report_mode == "internal":
-            sections.append(f"```\n{AI_PROMPT}\n```\n")
+            out.append(f"```\n{AI_PROMPT}\n```\n")
 
         # ── Header ──
-        sections.append(f"# iOS DAST/SAST Report — `{c.bundle_id}`\n")
-        sections.append(f"**Generated:** {now}  ")
-        sections.append(f"**Device:** {self.device_info.get('model', 'N/A')} "
-                        f"(iOS {self.device_info.get('ios_version', 'N/A')}, "
-                        f"build {self.device_info.get('build', 'N/A')})  ")
-        sections.append(f"**Device UDID:** `{c.device_id}`  ")
+        out.append(f"# iOS DAST/SAST Report — `{c.bundle_id}`\n")
+        out.append(f"**Generated:** {now}  ")
+        out.append(f"**Device:** {self.device_info.get('model', 'N/A')} "
+                   f"(iOS {self.device_info.get('ios_version', 'N/A')}, "
+                   f"build {self.device_info.get('build', 'N/A')})  ")
+        out.append(f"**Device UDID:** `{c.device_id}`  ")
         if getattr(c, "capabilities", None) is not None:
             try:
-                sections.append(f"**Device capabilities:** {c.capabilities.summary()}  ")
+                out.append(f"**Device capabilities:** {c.capabilities.summary()}  ")
             except Exception:
                 pass
         if c.ipa_path:
-            sections.append(f"**IPA:** `{c.ipa_path}`  ")
+            out.append(f"**IPA:** `{c.ipa_path}`  ")
         if getattr(c, "ipa_hash", None):
-            sections.append(f"**IPA SHA-256:** `{c.ipa_hash}`  ")
-        sections.append(f"**Pre-installed:** {'Yes' if c.is_preinstalled else 'No'}  ")
-        sections.append(f"**Tested logged in:** {'Yes' if c.logged_in else 'No'}\n")
+            out.append(f"**IPA SHA-256:** `{c.ipa_hash}`  ")
+        out.append(f"**Pre-installed:** {'Yes' if c.is_preinstalled else 'No'}  ")
+        out.append(f"**Tested logged in:** {'Yes' if c.logged_in else 'No'}\n")
+        return out
 
+    def _render_summary(self, deduped_findings, coverage) -> tuple[list[str], dict[str, int]]:
+        """Executive summary + severity table; also returns severity_counts so the JSON
+        export reuses the same single pass over the findings."""
+        c = self.config
+        out: list[str] = []
         # ── Executive Summary ──
-        sections.append("---\n## Executive Summary\n")
+        out.append("---\n## Executive Summary\n")
         total = sum(len(v) for v in deduped_findings.values())
         raw_total = sum(len(v) for v in c.findings.values())
         severity_counts: dict[str, int] = {}
@@ -449,28 +483,36 @@ class ReportGenerator:
                 if _confidence_for_finding(f["title"], f["detail"]) == "Confirmed":
                     confirmed_count += 1
 
-        sections.append(f"A total of **{total}** finding(s) were identified across "
-                        f"**{len([p for p in coverage if p['status'] != 'Skipped'])}** executed phase(s).\n")
+        out.append(f"A total of **{total}** finding(s) were identified across "
+                   f"**{len([p for p in coverage if p['status'] != 'Skipped'])}** executed phase(s).\n")
         if raw_total != total:
-            sections.append(
+            out.append(
                 f"Deduplication merged repeated entries: raw findings **{raw_total}** -> unique findings **{total}**.\n"
             )
-        sections.append(f"Confirmed findings (high-confidence evidence): **{confirmed_count}**.\n")
+        out.append(f"Confirmed findings (high-confidence evidence): **{confirmed_count}**.\n")
         if severity_counts:
-            sections.append("| Severity | Count |")
-            sections.append("|----------|-------|")
+            out.append("| Severity | Count |")
+            out.append("|----------|-------|")
             for sev in ["Critical", "High", "Medium", "Low", "Info"]:
                 if sev in severity_counts:
-                    sections.append(f"| {sev} | {severity_counts[sev]} |")
-            sections.append("")
+                    out.append(f"| {sev} | {severity_counts[sev]} |")
+            out.append("")
+        return out, severity_counts
 
-        sections.append("## Phase Coverage\n")
-        sections.append("| Phase | Status | Findings |")
-        sections.append("|-------|--------|----------|")
+    def _render_phase_coverage(self, coverage) -> list[str]:
+        """Phase-coverage table (executed / no-findings / skipped per expected phase)."""
+        out: list[str] = []
+        out.append("## Phase Coverage\n")
+        out.append("| Phase | Status | Findings |")
+        out.append("|-------|--------|----------|")
         for row in coverage:
-            sections.append(f"| {row['phase']} | {row['status']} | {row['findings']} |")
-        sections.append("")
+            out.append(f"| {row['phase']} | {row['status']} | {row['findings']} |")
+        out.append("")
+        return out
 
+    def _render_pii_entities(self, deduped_findings) -> list[str]:
+        """PII-entity rollup parsed from Presidio-style findings (empty list if none)."""
+        out: list[str] = []
         # ── PII Entity Summary (Presidio-detected findings only) ──
         pii_entities: dict[str, dict] = {}  # entity_type -> {count, severities, scores}
         for phase_findings in deduped_findings.values():
@@ -500,25 +542,31 @@ class ReportGenerator:
                         pii_entities[etype]["count"] += count
 
         if pii_entities:
-            sections.append("## PII Entities Detected\n")
-            sections.append("| Entity Type | Count | Highest Severity | Avg Confidence |")
-            sections.append("|-------------|-------|------------------|----------------|")
+            out.append("## PII Entities Detected\n")
+            out.append("| Entity Type | Count | Highest Severity | Avg Confidence |")
+            out.append("|-------------|-------|------------------|----------------|")
             for etype, info in sorted(pii_entities.items(), key=lambda x: x[1]["count"], reverse=True):
                 avg_conf = sum(info["scores"]) / len(info["scores"]) if info["scores"] else 0.0
-                sections.append(f"| {etype} | {info['count']} | {info['severity']} | {avg_conf:.2f} |")
-            sections.append("")
+                out.append(f"| {etype} | {info['count']} | {info['severity']} | {avg_conf:.2f} |")
+            out.append("")
+        return out
 
+    def _render_findings(self, deduped_findings, coverage, used_screenshot_paths) -> list[str]:
+        """Per-phase detailed write-ups: severity/confidence/CVSS/remediation/impact,
+        Jira drafts for High+Critical, and matched + leftover screenshot evidence."""
+        c = self.config
+        out: list[str] = []
         # ── Per-phase findings ──
-        sections.append("---\n## Detailed Findings\n")
+        out.append("---\n## Detailed Findings\n")
         for phase_name in EXPECTED_PHASES:
             phase_findings = deduped_findings.get(phase_name, [])
-            sections.append(f"### {phase_name}\n")
+            out.append(f"### {phase_name}\n")
             phase_state = next((x for x in coverage if x["phase"] == phase_name), None)
             if phase_state and phase_state["status"] == "Skipped":
-                sections.append("_Phase skipped in this execution._\n")
+                out.append("_Phase skipped in this execution._\n")
                 continue
             if phase_state and phase_state["status"] == "Executed (no findings)":
-                sections.append("_Executed: no findings detected in this phase._\n")
+                out.append("_Executed: no findings detected in this phase._\n")
             else:
                 for i, f in enumerate(phase_findings, 1):
                     normalized_detail = _normalize_detail(phase_name, f, c.commands_log)
@@ -527,29 +575,29 @@ class ReportGenerator:
                     remediation = _remediation_for_finding(f["title"], normalized_detail)
                     impact = _business_impact_for_finding(f["title"], normalized_detail)
 
-                    sections.append(f"#### {i}. {f['title']}\n")
-                    sections.append(f"- **Severity:** {f['severity']}")
-                    sections.append(f"- **Status:** {f['status']}")
-                    sections.append(f"- **Confidence:** {confidence}")
+                    out.append(f"#### {i}. {f['title']}\n")
+                    out.append(f"- **Severity:** {f['severity']}")
+                    out.append(f"- **Status:** {f['status']}")
+                    out.append(f"- **Confidence:** {confidence}")
                     if confidence == "Confirmed":
-                        sections.append("> **HIGHLIGHT: CONFIRMED EVIDENCE**")
-                    sections.append(f"- **CVSS (estimated):** {cvss_score}")
-                    sections.append(f"- **CVSS Vector (estimated):** `{cvss_vector}`")
+                        out.append("> **HIGHLIGHT: CONFIRMED EVIDENCE**")
+                    out.append(f"- **CVSS (estimated):** {cvss_score}")
+                    out.append(f"- **CVSS Vector (estimated):** `{cvss_vector}`")
                     if f.get("occurrences", 1) > 1:
-                        sections.append(f"- **Occurrences merged:** {f['occurrences']}")
-                    sections.append(f"- **Business Impact:** {impact}")
-                    sections.append(f"- **Remediation:** {remediation}")
-                    sections.append(f"- **Detail:**\n")
+                        out.append(f"- **Occurrences merged:** {f['occurrences']}")
+                    out.append(f"- **Business Impact:** {impact}")
+                    out.append(f"- **Remediation:** {remediation}")
+                    out.append(f"- **Detail:**\n")
                     detail_text = normalized_detail
                     total_len = len(detail_text)
                     if total_len > 3000:
                         detail_text = detail_text[:3000] + f"\n\n[... truncated — {total_len - 3000} more characters omitted ...]"
-                    sections.append(f"```\n{detail_text}\n```\n")
+                    out.append(f"```\n{detail_text}\n```\n")
                     if f["severity"] in {"High", "Critical"}:
-                        sections.append("- **Jira Draft:**")
-                        sections.append("```")
-                        sections.append(_jira_block(phase_name, f, cvss_score, remediation, normalized_detail))
-                        sections.append("```\n")
+                        out.append("- **Jira Draft:**")
+                        out.append("```")
+                        out.append(_jira_block(phase_name, f, cvss_score, remediation, normalized_detail))
+                        out.append("```\n")
 
                     matched_screenshots = _screenshots_for_finding(
                         c.screenshots,
@@ -558,11 +606,11 @@ class ReportGenerator:
                         used_screenshot_paths,
                     )
                     if matched_screenshots:
-                        sections.append("- **Screenshots (evidence):**")
+                        out.append("- **Screenshots (evidence):**")
                         for ss in matched_screenshots:
-                            sections.append(f"  - {ss['caption']}")
-                            sections.append(f"![{ss['caption']}]({ss['path']})")
-                        sections.append("")
+                            out.append(f"  - {ss['caption']}")
+                            out.append(f"![{ss['caption']}]({ss['path']})")
+                        out.append("")
 
             # Keep any unmatched screenshots in the same phase section (no global screenshot section).
             phase_unmapped = [
@@ -570,61 +618,72 @@ class ReportGenerator:
                 if ss["phase"] == phase_name and ss["path"] not in used_screenshot_paths
             ]
             if phase_unmapped:
-                sections.append("**Additional evidence captured in this phase:**")
+                out.append("**Additional evidence captured in this phase:**")
                 for ss in phase_unmapped:
-                    sections.append(f"- {ss['caption']}")
-                    sections.append(f"![{ss['caption']}]({ss['path']})")
+                    out.append(f"- {ss['caption']}")
+                    out.append(f"![{ss['caption']}]({ss['path']})")
                     used_screenshot_paths.add(ss["path"])
-                sections.append("")
+                out.append("")
+        return out
 
-        sections.append("---\n## Missing/Manual Steps Recommended\n")
-        sections.append(
+    def _render_manual_steps(self) -> list[str]:
+        """Static 'manual / out-of-band checks' recommendations block."""
+        out: list[str] = []
+        out.append("---\n## Missing/Manual Steps Recommended\n")
+        out.append(
             "- Validate authorization on backend APIs directly (token replay / IDOR checks), not only via UI/URL-scheme launches."
         )
-        sections.append("- Intercept TLS with a MitM proxy and confirm certificate/public-key pinning behavior (bypass with objection).")
-        sections.append("- Statically reverse the decrypted binary (class-dump / Hopper / Ghidra) and correlate with dynamic leakage findings.")
-        sections.append("- Re-test critical flows with non-owner / low-privileged roles where applicable.")
-        sections.append("- Add negative-test evidence for blocked paths (proof of mitigation/denial).")
-        sections.append("")
+        out.append("- Intercept TLS with a MitM proxy and confirm certificate/public-key pinning behavior (bypass with objection).")
+        out.append("- Statically reverse the decrypted binary (class-dump / Hopper / Ghidra) and correlate with dynamic leakage findings.")
+        out.append("- Re-test critical flows with non-owner / low-privileged roles where applicable.")
+        out.append("- Add negative-test evidence for blocked paths (proof of mitigation/denial).")
+        out.append("")
+        return out
 
+    def _render_commands_log(self) -> list[str]:
+        """Collapsible full command / evidence log."""
+        c = self.config
+        out: list[str] = []
         # ── Commands log ──
-        sections.append("---\n## Commands Executed\n")
-        sections.append("<details><summary>Click to expand full command log</summary>\n")
+        out.append("---\n## Commands Executed\n")
+        out.append("<details><summary>Click to expand full command log</summary>\n")
         for entry in c.commands_log:
-            sections.append(f"**Phase:** {entry['phase']}  ")
-            sections.append(f"```bash\n$ {entry['cmd']}\n```")
-            sections.append(f"- rc: `{entry.get('rc', 0)}`")
+            out.append(f"**Phase:** {entry['phase']}  ")
+            out.append(f"```bash\n$ {entry['cmd']}\n```")
+            out.append(f"- rc: `{entry.get('rc', 0)}`")
             if entry["stdout"]:
                 stdout_trimmed = entry["stdout"][:2000]
-                sections.append(f"```\n{stdout_trimmed}\n```")
+                out.append(f"```\n{stdout_trimmed}\n```")
             if entry["stderr"]:
-                sections.append(f"**stderr:**\n```\n{entry['stderr'][:1000]}\n```")
-            sections.append("")
-        sections.append("</details>\n")
+                out.append(f"**stderr:**\n```\n{entry['stderr'][:1000]}\n```")
+            out.append("")
+        out.append("</details>\n")
+        return out
 
+    def _render_risk_summary(self, deduped_findings) -> list[str]:
+        """Compact one-row-per-finding risk table."""
+        c = self.config
+        out: list[str] = []
         # ── Risk summary table ──
-        sections.append("---\n## Risk Summary\n")
-        sections.append("| # | Finding | Phase | Severity | Status | Confidence |")
-        sections.append("|---|---------|-------|----------|--------|------------|")
+        out.append("---\n## Risk Summary\n")
+        out.append("| # | Finding | Phase | Severity | Status | Confidence |")
+        out.append("|---|---------|-------|----------|--------|------------|")
         idx = 1
         for phase_name, phase_findings in deduped_findings.items():
             for f in phase_findings:
                 normalized_detail = _normalize_detail(phase_name, f, c.commands_log)
                 confidence = _confidence_for_finding(f["title"], normalized_detail)
                 confidence_cell = "**CONFIRMED**" if confidence == "Confirmed" else confidence
-                sections.append(
+                out.append(
                     f"| {idx} | {f['title']} | {phase_name} | {f['severity']} | {f['status']} | {confidence_cell} |"
                 )
                 idx += 1
-        sections.append("")
+        out.append("")
+        return out
 
-        full_report = "\n".join(sections)
-        try:
-            report_path.parent.mkdir(parents=True, exist_ok=True)
-            report_path.write_text(full_report, encoding="utf-8")
-        except OSError as e:
-            raise RuntimeError(f"Failed to write report to {report_path}: {e}") from e
-
+    def _build_json_export(self, deduped_findings, severity_counts, now: str) -> None:
+        """Write the sibling findings_*.json (mirrors the .md, same timestamp)."""
+        c = self.config
         # ── JSON findings export ──
         json_findings = []
         for phase_name, phase_findings in deduped_findings.items():
@@ -662,5 +721,3 @@ class ReportGenerator:
             json_path.write_text(json.dumps(json_export, indent=2, ensure_ascii=False), encoding="utf-8")
         except OSError:
             pass
-
-        return str(report_path)
