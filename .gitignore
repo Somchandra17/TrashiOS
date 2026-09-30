@@ -18,6 +18,9 @@ output/
 kimi_response.txt
 todo.txt
 
+# AI tooling local state
+.serena/
+
 # IDE
 .vscode/
 .idea/
