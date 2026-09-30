@@ -2,6 +2,24 @@
 
 All notable changes to TrashiOS are documented here.
 
+## [Unreleased]
+
+### Added
+- **Numbered app picker.** When the target app is already installed, the setup phase lists the
+  installed apps as a numbered menu; enter a number to pick one, or type a bundle id manually (it
+  need not be in the list). Apple `com.apple.*` built-ins are hidden from the list but can still be
+  typed. Lists "System"-registered apps too, so TrollStore / jailbreak installs appear
+  (`IOSDevice.get_installed_apps(include_system=True)`).
+- **vphone-cli support.** SSH probing now tries device port 44 (palera1n) then 22222 (vphone-cli's
+  dropbear) with the same password and keeps whichever answers.
+
+### Fixed
+- Remote commands get the jailbreak tool dirs (`/iosbinpack64`, `/var/jb`) prepended to `PATH`;
+  dropbear's non-interactive sessions start with a bare `PATH`, which made the `id` probe fail and
+  report `ssh=no, root=no`.
+- If a stale listener already owns the local iproxy port (e.g. `iproxy 2222 22`), the tunnel uses a
+  free port instead of silently routing through it.
+
 ## [1.0.0] — First stable release (final polish pass)
 
 Milestone release: a full cross-codebase polish pass over correctness, consistency, the CLI and

@@ -14,6 +14,8 @@ launch_app / force_stop / list_dir / get_app_data_path / is_rooted /
 get_device_info / get_devices) so phases barely change.
 
 palera1n note: OpenSSH listens on device port **44**, root password "alpine".
+vphone-cli note: the VM's dropbear listens on device port **22222** (same "alpine" password).
+`connect()` probes both ports and keeps whichever one answers.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ import os
 import plistlib
 import shlex
 import shutil
+import socket
 import subprocess
 import tempfile
 import time
@@ -35,6 +38,30 @@ from rich.console import Console
 from core.config import TIMING
 
 console = Console()
+
+# Device-side SSH ports probed in order: palera1n OpenSSH (44), vphone-cli dropbear (22222).
+SSH_DEVICE_PORTS = (44, 22222)
+
+# vphone's dropbear runs non-interactive commands with PATH=/usr/bin:/bin and never sources the rc
+# files, so id/ls/cat report "not found". Prepend the jailbreak tool dirs to every remote command.
+REMOTE_PATH_PREFIX = (
+    "export PATH=/iosbinpack64/bin:/iosbinpack64/usr/bin:/iosbinpack64/sbin:/iosbinpack64/usr/sbin"
+    ":/var/jb/usr/bin:/var/jb/bin:/var/jb/usr/sbin:/var/jb/sbin:$PATH; "
+)
+
+
+def _port_in_use(port: int) -> bool:
+    """True when something is already listening on 127.0.0.1:<port>."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.5)
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
+def _free_port() -> int:
+    """An unused local TCP port chosen by the OS."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
 
 
 class IOSError(Exception):
@@ -87,6 +114,10 @@ class IOSDevice:
         """Start the USB->SSH tunnel idempotently (iproxy <local> <device>)."""
         if self._iproxy_proc is not None and self._iproxy_proc.poll() is None:
             return True
+        if _port_in_use(self.local_port):
+            # A foreign listener (e.g. a stale `iproxy 2222 22`) owns the port and would route
+            # us to the wrong device port; tunnel on a free port instead.
+            self.local_port = _free_port()
         try:
             self._iproxy_proc = subprocess.Popen(
                 ["iproxy", str(self.local_port), str(self.ssh_device_port)],
@@ -132,16 +163,31 @@ class IOSDevice:
             caps.frida = r.returncode == 0
         except Exception:
             caps.frida = False
-        # ssh-over-USB
-        try:
-            r = self.shell("id", timeout=12)
-            out = (r.stdout or "")
-            caps.ssh = "uid=" in out
-            caps.root = "uid=0" in out
-        except Exception:
-            caps.ssh = False
-            caps.root = False
+        caps.ssh, caps.root = self._probe_ssh()
         return caps
+
+    def _probe_ssh(self) -> tuple[bool, bool]:
+        """Try the configured SSH device port, then the other known ones (palera1n 44, vphone
+        22222), each with the same password. Keeps the tunnel on the first port that logs in
+        and returns (ssh_ok, root_ok)."""
+        original = self.ssh_device_port
+        ports = [original] + [p for p in SSH_DEVICE_PORTS if p != original]
+        for port in ports:
+            if port != self.ssh_device_port:
+                self.close()
+                self.ssh_device_port = port
+            try:
+                self._ensure_iproxy()
+                out = self.shell("id", timeout=12).stdout or ""
+            except Exception:
+                continue
+            if "uid=" in out:
+                if port != original:
+                    console.print(f"[dim]SSH answered on device port {port} (not {original})[/dim]")
+                return True, "uid=0" in out
+        self.close()
+        self.ssh_device_port = original
+        return False, False
 
     # ── ssh / scp helpers ────────────────────────────────────────
 
@@ -170,7 +216,7 @@ class IOSDevice:
         if self._sshpass:
             argv += ["sshpass", "-p", self.ssh_pw]
         argv += ["ssh", "-p", str(self.local_port)] + self._ssh_base_opts()
-        argv += ["root@127.0.0.1", remote_cmd]
+        argv += ["root@127.0.0.1", REMOTE_PATH_PREFIX + remote_cmd]
         return argv
 
     def _scp_argv(self, remote: str, local: str) -> list[str]:
@@ -239,10 +285,13 @@ class IOSDevice:
 
     # ── app management (mirror ADB) ──────────────────────────────
 
-    def _installer_list(self) -> str:
+    def _installer_list(self, include_system: bool = False) -> str:
         """Run the app-list command, handling the ideviceinstaller 1.2.0 CLI change
-        (`list` subcommand) with a fallback to the legacy `-l` flag (1.1.x)."""
-        for variant in (["list"], ["-l"]):
+        (`list` subcommand) with a fallback to the legacy `-l` flag (1.1.x). The default lists
+        only "User" apps; *include_system* lists every app (`--all` / legacy `-o list_all`)."""
+        variants = ((["list", "--all"], ["-l", "-o", "list_all"]) if include_system
+                    else (["list"], ["-l"]))
+        for variant in variants:
             try:
                 r = subprocess.run(["ideviceinstaller"] + self._u() + variant,
                                    capture_output=True, text=True, timeout=90)
@@ -253,10 +302,11 @@ class IOSDevice:
                 return r.stdout
         return ""
 
-    def get_installed_apps(self) -> dict[str, str]:
-        """Return {bundle_id: display_name} via ideviceinstaller."""
+    def get_installed_apps(self, include_system: bool = False) -> dict[str, str]:
+        """Return {bundle_id: display_name} via ideviceinstaller. TrollStore / jailbreak installs
+        register as "System" apps, so pass *include_system* to see them."""
         apps: dict[str, str] = {}
-        stdout = self._installer_list()
+        stdout = self._installer_list(include_system)
         for line in stdout.splitlines():
             line = line.strip()
             if not line or line.lower().startswith("total") or line.startswith("CFBundleIdentifier"):

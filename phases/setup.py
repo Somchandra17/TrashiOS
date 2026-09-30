@@ -10,6 +10,7 @@ import re
 from pathlib import Path
 
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.prompt import Prompt, Confirm
 
@@ -53,18 +54,45 @@ def select_device() -> str:
         console.print("[red]Invalid selection, try again.[/red]")
 
 
+def _select_installed_app(apps: dict[str, str]) -> str:
+    """Show *apps* ({bundle_id: name}) as a numbered list and return the chosen bundle id.
+    The prompt takes either a list number or a bundle id typed by hand (which may not be in the list)."""
+    entries = sorted(apps.items(), key=lambda kv: (kv[1].lower(), kv[0]))
+    width = len(str(len(entries)))
+    console.print("[dim]Installed apps (Apple built-ins hidden — type a bundle id to use one):[/dim]")
+    for i, (bid, name) in enumerate(entries, 1):
+        console.print(f"  [cyan]{i:>{width}}.[/cyan] {escape(name)} [dim]— {escape(bid)}[/dim]")
+
+    while True:
+        choice = Prompt.ask(
+            "Enter the app number, or type a bundle id manually (e.g. com.example.app)"
+        ).strip()
+        if choice.isdigit():
+            idx = int(choice) - 1
+            if 0 <= idx < len(entries):
+                bid, name = entries[idx]
+                console.print(f"[green]Selected:[/green] {escape(name)} [dim]({escape(bid)})[/dim]")
+                return bid
+            console.print(f"[red]No app #{choice} — pick 1-{len(entries)} or type a bundle id.[/red]")
+        elif _validate_bundle_id(choice):
+            return choice
+        else:
+            console.print("[red]Invalid bundle id format. Expected: com.example.app[/red]")
+
+
 def get_app_input(device: IOSDevice) -> tuple[str | None, str, bool]:
     """Returns (ipa_path or None, bundle_id, is_preinstalled)."""
     console.print("\n[bold cyan]═══ Target Application ═══[/bold cyan]\n")
     preinstalled = Confirm.ask("Is the app already installed on the device?", default=True)
 
     if preinstalled:
-        # Offer the installed-app list to make bundle-id selection easy.
-        apps = device.get_installed_apps()
+        # Offer the installed apps as a numbered list; fall back to typing the id when none can be listed.
+        # TrollStore / jailbreak installs register as "System" apps, so list everything and hide
+        # Apple's built-ins (they can still be typed in by hand).
+        apps = {bid: name for bid, name in device.get_installed_apps(include_system=True).items()
+                if not bid.startswith("com.apple.")}
         if apps:
-            console.print("[dim]Installed apps (bundle id — name):[/dim]")
-            for bid, name in sorted(apps.items()):
-                console.print(f"  [dim]{bid}[/dim] — {name}")
+            return None, _select_installed_app(apps), True
         bid = Prompt.ask("Enter the target bundle identifier (e.g. com.example.app)").strip()
         while not _validate_bundle_id(bid):
             console.print("[red]Invalid bundle id format. Expected: com.example.app[/red]")

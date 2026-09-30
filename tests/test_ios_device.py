@@ -55,6 +55,23 @@ class TestIOSDeviceParsing(unittest.TestCase):
         self.assertEqual(apps.get("com.other.app"), "Other App")
         self.assertNotIn("CFBundleIdentifier", apps)
 
+    @patch("core.ios_device.subprocess.run")
+    def test_installer_list_include_system_uses_all_flags(self, run_mock):
+        """Default lists User apps only; include_system adds `--all` (1.2.0) or `-o list_all` (1.1.x)."""
+        run_mock.return_value = _cp(stdout="com.x, \"1.0\", \"X\"\n")
+        dev = IOSDevice(udid="u")
+        dev.get_installed_apps()
+        self.assertEqual(run_mock.call_args[0][0][-1], "list")
+        dev.get_installed_apps(include_system=True)
+        self.assertEqual(run_mock.call_args[0][0][-2:], ["list", "--all"])
+
+        # 1.2.0 flags rejected -> legacy variant
+        run_mock.reset_mock()
+        run_mock.side_effect = [_cp(rc=1, stderr="invalid option"),
+                                _cp(stdout="com.y, \"1.0\", \"Y\"\n")]
+        self.assertEqual(dev.get_installed_apps(include_system=True), {"com.y": "Y"})
+        self.assertEqual(run_mock.call_args[0][0][-3:], ["-l", "-o", "list_all"])
+
     def test_get_bundle_id_from_ipa(self):
         with tempfile.TemporaryDirectory() as tmp:
             ipa = Path(tmp) / "app.ipa"
@@ -80,6 +97,60 @@ class TestIOSDeviceParsing(unittest.TestCase):
         self.assertIn("root@127.0.0.1", argv)
         self.assertEqual(argv[argv.index("-p") + 1], "2222")
         self.assertEqual(out.stdout, "uid=0(root)")
+
+    @patch("core.ios_device.subprocess.run")
+    def test_shell_prefixes_remote_path(self, run_mock):
+        """vphone's dropbear gives non-interactive commands a bare PATH; every remote command
+        must extend it so id/ls/cat resolve."""
+        captured = {}
+        run_mock.side_effect = lambda argv, **kw: captured.update(argv=argv) or _cp(stdout="x")
+        dev = IOSDevice(udid="u")
+        dev._iproxy_proc = SimpleNamespace(poll=lambda: None)
+        dev.shell("id")
+        remote = captured["argv"][-1]
+        self.assertTrue(remote.startswith("export PATH=/iosbinpack64/bin"))
+        self.assertTrue(remote.endswith("; id"))
+
+    @patch("core.ios_device.time.sleep")
+    @patch("core.ios_device.subprocess.Popen")
+    @patch("core.ios_device._port_in_use", return_value=False)
+    @patch("core.ios_device.subprocess.run")
+    def test_probe_ssh_falls_back_to_vphone_port(self, run_mock, _in_use, popen_mock, _sleep):
+        """Port 44 (palera1n) refuses; 22222 (vphone dropbear) answers -> ssh+root, port kept."""
+        popen_mock.return_value = SimpleNamespace(poll=lambda: None, terminate=lambda: None,
+                                                  wait=lambda timeout=None: 0)
+        tunnels = []
+        popen_mock.side_effect = lambda argv, **kw: (tunnels.append(argv[2]), popen_mock.return_value)[1]
+        run_mock.side_effect = lambda argv, **kw: (
+            _cp(stdout="uid=0(root)") if tunnels[-1] == "22222" else _cp(rc=255, stderr="refused"))
+        dev = IOSDevice(udid="u", ssh_device_port=44)
+        self.assertEqual(dev._probe_ssh(), (True, True))
+        self.assertEqual(tunnels, ["44", "22222"])
+        self.assertEqual(dev.ssh_device_port, 22222)
+
+    @patch("core.ios_device.time.sleep")
+    @patch("core.ios_device.subprocess.Popen")
+    @patch("core.ios_device._port_in_use", return_value=False)
+    @patch("core.ios_device.subprocess.run")
+    def test_probe_ssh_reports_unavailable_and_restores_port(self, run_mock, _in_use, popen_mock, _sleep):
+        popen_mock.return_value = SimpleNamespace(poll=lambda: None, terminate=lambda: None,
+                                                  wait=lambda timeout=None: 0)
+        run_mock.return_value = _cp(rc=255, stderr="refused")
+        dev = IOSDevice(udid="u", ssh_device_port=44)
+        self.assertEqual(dev._probe_ssh(), (False, False))
+        self.assertEqual(dev.ssh_device_port, 44)
+
+    @patch("core.ios_device.time.sleep")
+    @patch("core.ios_device.subprocess.Popen")
+    @patch("core.ios_device._free_port", return_value=54321)
+    @patch("core.ios_device._port_in_use", return_value=True)
+    def test_ensure_iproxy_avoids_foreign_listener(self, _in_use, _free, popen_mock, _sleep):
+        """A stale iproxy already on 2222 must not be reused; tunnel on a free port instead."""
+        popen_mock.return_value = SimpleNamespace(poll=lambda: None)
+        dev = IOSDevice(udid="u", local_port=2222)
+        self.assertTrue(dev._ensure_iproxy())
+        self.assertEqual(dev.local_port, 54321)
+        self.assertEqual(popen_mock.call_args[0][0][1], "54321")
 
     @patch("core.ios_device.subprocess.run")
     def test_screencap_accepts_png(self, run_mock):
